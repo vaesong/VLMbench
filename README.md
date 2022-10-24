@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # VLMbench: A Compositional Benchmark for Vision-and-Language Manipulation
 
 ![task image missing](readme_files/teaser.svg)
@@ -92,11 +93,4 @@ All tasks templates in the current vlmbench can be found in *vlm/tasks*. To gene
  year = {2022}
 }
 ```
-=======
-# VLMbench
-vlmbench code
->>>>>>> origin/main
-=======
-# VLMbench
-vlmbench code
->>>>>>> origin/main
+
