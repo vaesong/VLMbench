@@ -14,7 +14,7 @@ import torch.nn.functional as F
 # from env import R2RBatch
 #import utils
 #from utils import padding_idx, print_progress
-import model_OSCAR, model_PREVALENT
+import model_PREVALENT
 import os
 from pickle import NONE
 import time
@@ -70,6 +70,25 @@ def save(epoch, path,vln_bert,optim):
                 create_state(*param)
         torch.save(states, path)
 
+def load(path,vln_bert,optim):
+        ''' Loads parameters (but not training state) '''
+        states = torch.load(path)
+
+        def recover_state(name, model, optimizer):
+                state = model.state_dict()
+                model_keys = set(state.keys())
+                load_keys = set(states[name]['state_dict'].keys())
+                if model_keys != load_keys:
+                        print("NOTICE: DIFFERENT KEYS IN THE LISTEREN")
+                        state.update(states[name]['state_dict'])
+                        model.load_state_dict(state)
+                        if args.loadOptim:
+                                optimizer.load_state_dict(states[name]['optimizer'])
+        all_tuple = [("vln_bert", vln_bert, optim)]
+        for param in all_tuple:
+                recover_state(*param)
+        return states['vln_bert']['epoch'] - 1,vln_bert,optim
+
 class NextActionPrediction(nn.Module):
     """
     2-class classification model : is_next, is_not_next
@@ -98,12 +117,7 @@ def main(args):
         if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
         writer = SummaryWriter(log_dir=log_dir)
-        
-        vln_bert = model_PREVALENT.VLNBERT().cuda()
-        critic = model_PREVALENT.Critic().cuda()
-        optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
-        vln_bert.train()
-        optimizer.zero_grad()
+                
 
         criterion = nn.CrossEntropyLoss(ignore_index=-1)
         criterion2 = nn.SmoothL1Loss()
@@ -132,28 +146,33 @@ def main(args):
 
         base_vocab = ['<PAD>', '<UNK>', '<EOS>']
         padding_idx = base_vocab.index('<PAD>')
+
         
         if args.load is not None:
-                if args.aug is None:
-                        start_iter = listner.load(os.path.join(args.load))
-                        print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
-                else:
-                        load_iter = listner.load(os.path.join(args.load))
-                        print("\nLOAD the model from {}, iteration ".format(args.load, load_iter))
+                start_iter,vln_bert,optimizer = load(os.path.join(args.load))
+                print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
+                vln_bert=vln_bert.cuda()
+        else:
+                vln_bert = model_PREVALENT.VLNBERT().cuda()
+                # critic = model_PREVALENT.Critic().cuda()
+                optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
+
+        vln_bert.train()
 
         for iter in range(1, args.iters+1):
                 total_acc_mlm,total_acc_itm, total_action_loss= 0,0,0
                 avg_acc_mlm,avg_acc_itm,avg_action_loss = 0,0,0
                 step_mlm,step_itm,step_action = 0,0,0
+                optimizer.zero_grad()
                 for batch_step, batch_data in enumerate(train_loader):
                         if len(batch_data)==0:
                                 continue                
                         prob_itm = np.random.random()
-                        if prob_itm <= 0.2:
+                        if prob_itm <= 0.25:
                                 task = "mlm"
                                 language = batch_data["mask_language"]
                                 img = batch_data["traj"]
-                        elif prob_itm <= 0.4:
+                        elif prob_itm <= 0.5:
                                 task = "itm"
                                 language = batch_data["language"]
                                 img = batch_data["random_traj"]
@@ -181,10 +200,9 @@ def main(args):
                                 visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long()
                         visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
 
-
                         candidate_feat=[]
                         for i in range(args.batch_size):
-                                rgb = batch_data["traj"][i]
+                                rgb = img[i]
                                 rgb = rgb.permute(0,3,1,2).float() 
                                 img_feat = resnet152(rgb.cuda()).cpu().data.numpy()
                                 action_feat = np.repeat(batch_data["action"][i], 16, axis=1).numpy()

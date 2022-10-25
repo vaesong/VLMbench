@@ -31,7 +31,7 @@ If you want to generate unseen data, please set the colors and objects to the un
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    '/home/liuchang/DATA/rlbench_data/train',
+                    '/home/liuchang/DATA/rlbench_data/train_all_tasks',
                     'Where to save the demos.')
 flags.DEFINE_list('tasks',[
                             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',

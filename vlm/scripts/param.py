@@ -60,7 +60,7 @@ class Param:
         self.parser.add_argument("--normalize", dest="normalize_loss", default="total", type=str, help='batch or total')
 
         # vlmbench
-        self.parser.add_argument('--data_dir',default="/home/liuchang/projects/VLMbench/rlbench_data" ,type=str)
+        self.parser.add_argument('--data_dir',default="/home/liuchang/DATA/rlbench_data" ,type=str)
         self.parser.add_argument('--setd', type=str, default='train')
         self.parser.add_argument('--img_size',nargs='+', type=int, default=[360, 360])
         self.parser.add_argument('--batch_size', type=int, default=16, metavar='N',

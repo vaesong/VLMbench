@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # VLMbench: A Compositional Benchmark for Vision-and-Language Manipulation
 
 ![task image missing](readme_files/teaser.svg)

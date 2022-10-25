@@ -39,7 +39,6 @@ def keypoint_discovery(demo):
     return episode_keypoints
 
 def max_sperate_index(inputs):
-
     max = 0
     for i in range(len(inputs)):
         if i > 0:# 保证有两个数

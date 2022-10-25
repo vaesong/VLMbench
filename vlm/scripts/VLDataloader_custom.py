@@ -270,7 +270,7 @@ class VLM_dataset(Dataset):
             range1 = select_frames[sperate_index-1]
             range2 = select_frames[sperate_index]
 
-            random_index1 = random.randint(range1+1,int(range1+(range1+range2)/2))
+            random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
             random_index2 = random.randint(random_index1+1,range2-1)
             select_frames.insert(sperate_index,random_index2)
             select_frames.insert(sperate_index,random_index1)

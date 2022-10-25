@@ -18,10 +18,13 @@ from pyrep.const import RenderMode
 from amsolver.utils import get_stored_demos
 from amsolver.backend.utils import task_file_to_task_class
 from num2words import num2words
-from tools.cinematic_recorder import TaskRecorder, CameraMotion
-from pyvirtualdisplay import Display
-disp = Display().start()
-
+from pytorch_transformers import  BertTokenizer
+import torchvision.models as models
+import torch.nn as nn
+import model_PREVALENT
+from train_vlmbench import load
+# from pyvirtualdisplay import Display
+# disp = Display().start()
 class Recorder(object):
     def __init__(self) -> None:
         cam_placeholder = Dummy('cam_cinematic_placeholder')
@@ -48,7 +51,7 @@ class Recorder(object):
 
 class ReplayAgent(object):
 
-    def act(self, step_list, step_id, obs, lang, use_gt_xy=False,use_gt_z=False, use_gt_theta=False, use_gt_roll_pitch=False):
+     def act(self, step_list, step_id, obs, lang, use_gt_xy=False,use_gt_z=False, use_gt_theta=False, use_gt_roll_pitch=False):
         current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step_list[step_id]
         action = np.zeros(8)
         action[:7] = gt_pose
@@ -154,6 +157,30 @@ class CliportAgent(object):
         self.prev_pose = action[:7]
         return action, waypoint_type
 
+class RecurrentBertAgent():
+    def __init__(self,args=None) -> None:
+        self.tok = BertTokenizer.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997')
+        resnet152 = models.resnet152(pretrained=True)
+        resnet152.fc = nn.Linear(2048,2048)
+        for parm in resnet152.parameters():
+                parm.requires_grad = False 
+        resnet152=resnet152.cuda()
+        self.resnet = resnet152
+        self.vlnbert= model_PREVALENT.VLNBERT().cuda()
+        self.args = args
+    def act(self,obs,langauge):
+        lang_tokens = self.tok.tokenize(langauge)
+        temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
+        instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
+        instr_tokens=self.tok.convert_tokens_to_ids(instr_tokens)
+        
+        if args.checkpoints is not None:
+                start_iter = load(os.path.join(args.checkpoints))
+                print("\nLOAD the model from {}, iteration ".format(args.checkpoints, start_iter))
+        else:
+                load_iter = load(os.path.join(args.checkpoints))
+                print("\nLOAD the model from {}, iteration ".format(args.checkpoints, load_iter))
+        
 def load_test_config(data_folder: Path, task_name):
     episode_list = []
     for path in data_folder.rglob('configs*'):
@@ -176,12 +203,12 @@ def add_argments():
     #dataset
     parser.add_argument('--data_folder', type=str)
     parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument('--checkpoints_folder', type=str)
+    parser.add_argument('--checkpoints', type=str)
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
     parser.add_argument('--gpu', type=int, default=7)
+    parser.add_argument('--language_padding', type=int, default=80)
     parser.add_argument('--task', type=str, default=None)
-    parser.add_argument('--recorder', type=bool, default=False)
     parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
@@ -221,9 +248,8 @@ if __name__=="__main__":
     obs_config.wrist_camera.render_mode = RenderMode.OPENGL
     obs_config.front_camera.render_mode = RenderMode.OPENGL
 
-    # if args.recorder:
-    #     recorder = Recorder()
-
+    # recorder = Recorder()
+    recorder = None
     need_test_numbers = 100
     replay_test = args.replay
     
@@ -267,24 +293,10 @@ if __name__=="__main__":
     env = Environment(action_mode, obs_config=obs_config, headless=True) # set headless=False, if user want to visualize the simulator
     env.launch()
 
-    if args.recorder:
-        camera = VisionSensor.create([640, 360])
-        motion = CameraMotion(camera)
-        recorder = TaskRecorder(env, motion)
-
-
     train_tasks = [task_file_to_task_class(t, parent_folder = 'vlm') for t in task_files]
     data_folder = Path(os.path.join(args.data_folder, args.setd))
     if not replay_test:
-        checkpoint = args.checkpoints_folder + f"/conv_checkpoint_{args.model_name}_{args.task}"
-        if args.relative:
-            checkpoint += '_relative'
-        if args.renew_obs:
-            checkpoint += '_renew'
-        if args.add_low_lang:
-            checkpoint += '_low'
-        checkpoint += '_best.pth'
-
+        checkpoint = args.checkpoints
         agent = CliportAgent(args.model_name, device_id=args.gpu,z_roll_pitch=True, checkpoint=checkpoint, args=args)
     else:
         agent = ReplayAgent()
@@ -340,82 +352,3 @@ if __name__=="__main__":
                 print(f"need re-generate: {e}")
                 continue
             step_list = CliportAgent.generate_action_list(waypoints_info, args)
-            action_list = []
-            collision_checking_list = []
-            for i, sub_step in enumerate(step_list):
-                lang = high_descriptions+f" Step {num2words(i)}."
-                if args.add_low_lang:
-                    lang += sub_step[1]
-                if args.goal_conditioned and i == 0:
-                    action, action_type = agent.act(step_list, i, obs, lang, use_gt_xy=True, use_gt_z= True, use_gt_theta= True, use_gt_roll_pitch=True)
-                else:
-                    action, action_type = agent.act(step_list, i, obs, lang, use_gt_xy=False, use_gt_z= False, use_gt_theta= False, use_gt_roll_pitch=False)
-                if "grasp" in action_type:
-                    pre_action = action.copy()
-                    pose = R.from_quat(action[3:7]).as_matrix()
-                    pre_action[:3] -= 0.08*pose[:, 2]
-                    pre_action[7] = 1
-                    action_list+=[pre_action, action]
-                    collision_checking_list += [True, False]
-                    if need_post_grap:
-                        post_action = action.copy()
-                        post_action[2] = post_action[2] + 0.08
-                        action_list += [post_action]
-                        collision_checking_list+=[False]
-                else:
-                    if need_pre_move:
-                        pre_action = action.copy()
-                        pose = R.from_quat(action[3:7]).as_matrix()
-                        pre_action[:3] -= 0.08*pose[:, 2]
-                        pre_action[7] = 0
-                        action_list+=[pre_action]
-                        collision_checking_list += [None]
-                    action_list+= [action]
-                    collision_checking_list += [None]
-                if renew_obs:
-                    try:
-                        grasped = False
-                        successed = False
-                        for action, collision_checking in zip(action_list,collision_checking_list):
-                            obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
-                            if recorder is not None:
-                                recorder.take_snap(obs=obs)
-                            if reward == 0.5:
-                                grasped = True
-                            elif reward == 1:
-                                success_times+=1
-                                successed = True
-                                break
-                        action_list = []
-                        collision_checking_list = []
-                        if grasped:
-                            grasp_success_times+=1
-                        if successed:
-                            break
-                    except Exception as e:
-                        print(e)
-                        break
-            if not renew_obs and len(action_list):
-                try:
-                    for action, collision_checking in zip(action_list,collision_checking_list):
-                        obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
-                        if recorder is not None:
-                            recorder.take_snap(obs=obs)
-                        if reward == 1:
-                            success_times+=1
-                            break
-                        elif reward == 0.5:
-                            grasp_success_times += 1
-                except Exception as e:
-                    print(e)
-            if recorder is not None:
-                recorder.save(f"./records/error1_{task.get_name()}.avi")
-            print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
-            print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
-            file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")
-            if args.wandb_entity is not None:
-                wandb.log({"success":success_times, "grasp_success":grasp_success_times}, step=all_time)
-        if args.wandb_entity is not None:
-            wandb.finish()
-    file.close()
-    env.shutdown()
