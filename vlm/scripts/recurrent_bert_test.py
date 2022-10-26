@@ -164,8 +164,12 @@ class RecurrentBertAgent():
     def __init__(self,args=None) -> None:
         self.tok = BertTokenizer.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997')
         self.vln_bert= model_PREVALENT.VLNBERT().cuda()
+        for parm in self.vln_bert.parameters():
+            parm.requires_grad = False 
+        for parm in self.vln_bert.fc.parameters():
+            parm.requires_grad = True 
         self.args = args
-    def act(self,img,langauge,action_feat):
+    def act(self,img,langauge,action_feat,state):
         '''
         obs:raw image sequence
         langauge :raw language
@@ -175,12 +179,14 @@ class RecurrentBertAgent():
         temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
         instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
         language = self.tok.convert_tokens_to_ids(instr_tokens)
-        if args.checkpoints is not None:
-                start_iter = load(os.path.join(args.checkpoints))
-                print("\nLOAD the model from {}, iteration ".format(args.checkpoints, start_iter))
+        if args.load is not None:
+                start_iter,vln_bert,optimizer = load(os.path.join(args.load))
+                print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
+                vln_bert=vln_bert.cuda()
         else:
-                load_iter = load(os.path.join(args.checkpoints))
-                print("\nLOAD the model from {}, iteration ".format(args.checkpoints, load_iter))
+                vln_bert = model_PREVALENT.VLNBERT().cuda()
+                # critic = model_PREVALENT.Critic().cuda()
+                optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
         # language initial
         language_attention_mask = (language != 0).long().cuda()
         token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                                  
@@ -190,7 +196,8 @@ class RecurrentBertAgent():
         'lang_mask':         language_attention_mask,  
         'token_type_ids': token_type_ids}
         h_t, language_features = self.vln_bert(**language_inputs)
-        language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+        if state is not None:
+            language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
 
         visual_temp_mask=torch.tensor([1]*len(img)).long()
         visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
@@ -232,9 +239,9 @@ def add_argments():
     #dataset
     parser.add_argument('--data_folder', type=str)
     parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument('--checkpoints', type=str)
+    parser.add_argument("--load", default=None, help='path of the trained model')
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
-    parser.add_argument('--maxAction', type=int, default=8, help='Max Action sequence')
+    parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
     parser.add_argument('--gpu', type=int, default=7)
     parser.add_argument('--language_padding', type=int, default=80)
@@ -390,13 +397,14 @@ if __name__=="__main__":
             except:
                 print(f"need re-generate: {e}")
                 continue
-
+            
+            step_list = CliportAgent.generate_action_list(waypoints_info, args)
             for i, sub_step in enumerate(step_list):
                 lang = lang+f" Step {num2words(i)}."
                 if args.add_low_lang:
                     lang += sub_step[1]
             print(lang)
-            step_list = CliportAgent.generate_action_list(waypoints_info, args)
+            
             history_img = []
             history_action = []
             hidden_states = []
