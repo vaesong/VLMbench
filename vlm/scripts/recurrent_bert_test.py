@@ -197,6 +197,8 @@ class RecurrentBertAgent():
         'token_type_ids': token_type_ids}
         h_t, language_features = self.vln_bert(**language_inputs)
         if state is not None:
+            language_features = torch.cat((state.unsqueeze(1), language_features[:,1:,:]), dim=1)
+        else:
             language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
 
         visual_temp_mask=torch.tensor([1]*len(img)).long()
@@ -410,10 +412,11 @@ if __name__=="__main__":
             hidden_states = []
             rewards=[]
             actions=[]
+            state = None
             for i in range(args.maxAction):
                 history_img.append(obs.front_rgb)
                 history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                state,action = agent.act(history_img,lang,history_action)
+                state,action = agent.act(history_img,lang,history_action,state)
                 hidden_states.append(state)
                 actions.append(action)
                 obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
