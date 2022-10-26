@@ -19,8 +19,8 @@ from amsolver.utils import get_stored_demos
 from amsolver.backend.utils import task_file_to_task_class
 from num2words import num2words
 from tools.cinematic_recorder import TaskRecorder, CameraMotion
-from pyvirtualdisplay import Display
-disp = Display().start()
+# from pyvirtualdisplay import Display
+# disp = Display().start()
 
 class Recorder(object):
     def __init__(self) -> None:
@@ -45,6 +45,16 @@ class Recorder(object):
             video.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         video.release()
         self._snaps = []
+
+class CircleCameraMotion(CameraMotion):
+
+    def __init__(self, cam: VisionSensor, origin: Dummy, speed: float):
+        super().__init__(cam)
+        self.origin = origin
+        self.speed = speed  # in radians
+
+    def step(self):
+        self.origin.rotate([0, 0, self.speed])
 
 class ReplayAgent(object):
 
@@ -221,8 +231,7 @@ if __name__=="__main__":
     obs_config.wrist_camera.render_mode = RenderMode.OPENGL
     obs_config.front_camera.render_mode = RenderMode.OPENGL
 
-    # if args.recorder:
-    #     recorder = Recorder()
+    
 
     need_test_numbers = 100
     replay_test = args.replay
@@ -268,9 +277,14 @@ if __name__=="__main__":
     env.launch()
 
     if args.recorder:
-        camera = VisionSensor.create([640, 360])
-        motion = CameraMotion(camera)
-        recorder = TaskRecorder(env, motion)
+        recorder = Recorder()
+    # if args.recorder:
+    #     cam_placeholder = Dummy('cam_cinematic_placeholder')
+    #     cam = VisionSensor.create([640, 360])
+    #     cam.set_pose(cam_placeholder.get_pose())
+    #     cam.set_parent(cam_placeholder)
+    #     cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), 0.005)
+    #     recorder = TaskRecorder(env, cam_motion, fps=30)
 
 
     train_tasks = [task_file_to_task_class(t, parent_folder = 'vlm') for t in task_files]
@@ -379,7 +393,7 @@ if __name__=="__main__":
                         for action, collision_checking in zip(action_list,collision_checking_list):
                             obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
                             if recorder is not None:
-                                recorder.take_snap(obs=obs)
+                                recorder.take_snap()
                             if reward == 0.5:
                                 grasped = True
                             elif reward == 1:
@@ -400,7 +414,7 @@ if __name__=="__main__":
                     for action, collision_checking in zip(action_list,collision_checking_list):
                         obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
                         if recorder is not None:
-                            recorder.take_snap(obs=obs)
+                            recorder.take_snap()
                         if reward == 1:
                             success_times+=1
                             break
@@ -409,7 +423,8 @@ if __name__=="__main__":
                 except Exception as e:
                     print(e)
             if recorder is not None:
-                recorder.save(f"./records/error1_{task.get_name()}.avi")
+                # recorder.save(f"./records/error1_{task.get_name()}.avi")
+                recorder.save(f"./records/{task.get_name()}/{num+1}.avi")
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
             file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")

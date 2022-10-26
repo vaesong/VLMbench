@@ -23,6 +23,9 @@ import torchvision.models as models
 import torch.nn as nn
 import model_PREVALENT
 from train_vlmbench import load
+from torch.autograd import Variable
+import utils
+# from param import args
 # from pyvirtualdisplay import Display
 # disp = Display().start()
 class Recorder(object):
@@ -160,27 +163,53 @@ class CliportAgent(object):
 class RecurrentBertAgent():
     def __init__(self,args=None) -> None:
         self.tok = BertTokenizer.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997')
-        resnet152 = models.resnet152(pretrained=True)
-        resnet152.fc = nn.Linear(2048,2048)
-        for parm in resnet152.parameters():
-                parm.requires_grad = False 
-        resnet152=resnet152.cuda()
-        self.resnet = resnet152
-        self.vlnbert= model_PREVALENT.VLNBERT().cuda()
+        self.vln_bert= model_PREVALENT.VLNBERT().cuda()
         self.args = args
-    def act(self,obs,langauge):
+    def act(self,img,langauge,action_feat):
+        '''
+        obs:raw image sequence
+        langauge :raw language
+        action_feat : gripper_pose+gripper_open
+        '''
         lang_tokens = self.tok.tokenize(langauge)
         temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
         instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
-        instr_tokens=self.tok.convert_tokens_to_ids(instr_tokens)
-        
+        language = self.tok.convert_tokens_to_ids(instr_tokens)
         if args.checkpoints is not None:
                 start_iter = load(os.path.join(args.checkpoints))
                 print("\nLOAD the model from {}, iteration ".format(args.checkpoints, start_iter))
         else:
                 load_iter = load(os.path.join(args.checkpoints))
                 print("\nLOAD the model from {}, iteration ".format(args.checkpoints, load_iter))
-        
+        # language initial
+        language_attention_mask = (language != 0).long().cuda()
+        token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                                  
+        language_inputs = {'mode':'language',
+        'sentence':       Variable(language, requires_grad=False).long().cuda(),
+        'attention_mask': language_attention_mask,
+        'lang_mask':         language_attention_mask,  
+        'token_type_ids': token_type_ids}
+        h_t, language_features = self.vln_bert(**language_inputs)
+        language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+
+        visual_temp_mask=torch.tensor([1]*len(img)).long()
+        visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
+        img = np.array(img)
+        visual_inputs = {
+                'mode':               'visual',
+                'sentence':           language_features,
+                'attention_mask':     visual_attention_mask,
+                'lang_mask':          language_attention_mask,
+                'vis_mask':           visual_temp_mask,
+                'token_type_ids':     token_type_ids,
+                # 'action_feats':       input_a_t,
+                # 'pano_feats':         f_t,
+                'img':                img,
+                "action_feats":       action_feat        
+        }
+        state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action= self.vln_bert(**visual_inputs)
+        return state_proj,action
+      
 def load_test_config(data_folder: Path, task_name):
     episode_list = []
     for path in data_folder.rglob('configs*'):
@@ -205,14 +234,16 @@ def add_argments():
     parser.add_argument('--setd', type=str, default="seen")
     parser.add_argument('--checkpoints', type=str)
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
+    parser.add_argument('--maxAction', type=int, default=8, help='Max Action sequence')
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
     parser.add_argument('--gpu', type=int, default=7)
     parser.add_argument('--language_padding', type=int, default=80)
     parser.add_argument('--task', type=str, default=None)
     parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
-    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
@@ -293,13 +324,21 @@ if __name__=="__main__":
     env = Environment(action_mode, obs_config=obs_config, headless=True) # set headless=False, if user want to visualize the simulator
     env.launch()
 
+    if args.recorder:
+        recorder = Recorder()
+
     train_tasks = [task_file_to_task_class(t, parent_folder = 'vlm') for t in task_files]
     data_folder = Path(os.path.join(args.data_folder, args.setd))
-    if not replay_test:
-        checkpoint = args.checkpoints
-        agent = CliportAgent(args.model_name, device_id=args.gpu,z_roll_pitch=True, checkpoint=checkpoint, args=args)
-    else:
-        agent = ReplayAgent()
+
+
+    # if not replay_test:
+    #     checkpoint = args.checkpoints
+    #     agent = CliportAgent(args.model_name, device_id=args.gpu,z_roll_pitch=True, checkpoint=checkpoint, args=args)
+    # else:
+    #     agent = ReplayAgent()
+
+    agent = RecurrentBertAgent()
+
     output_file_name = f"./results/{args.model_name}_{args.task}_{args.setd}"
     if args.goal_conditioned:
         output_file_name += "_goalcondition"
@@ -330,8 +369,8 @@ if __name__=="__main__":
             high_descriptions = descriptions[0]
             if high_descriptions[-1]!=".":
                 high_descriptions+="."
-            print(high_descriptions)
             target_grasp_obj_name = None
+
             try:
                 if len(waypoints_info['waypoint1']['target_obj_name'])!=0:
                     target_grasp_obj_name = waypoints_info['waypoint1']['target_obj_name']
@@ -351,4 +390,45 @@ if __name__=="__main__":
             except:
                 print(f"need re-generate: {e}")
                 continue
+
+            for i, sub_step in enumerate(step_list):
+                lang = lang+f" Step {num2words(i)}."
+                if args.add_low_lang:
+                    lang += sub_step[1]
+            print(lang)
             step_list = CliportAgent.generate_action_list(waypoints_info, args)
+            history_img = []
+            history_action = []
+            hidden_states = []
+            rewards=[]
+            actions=[]
+            for i in range(args.maxAction):
+                history_img.append(obs.front_rgb)
+                history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
+                state,action = agent.act(history_img,lang,history_action)
+                hidden_states.append(state)
+                actions.append(action)
+                obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
+                rewards.append(reward)
+                if reward == 0.5:
+                    grasped = True
+                elif reward == 1:
+                    success_times+=1
+                    successed = True
+                    break
+            print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
+            print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
+            file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")
+    file.close()
+    env.shutdown()
+
+
+
+
+        
+
+
+
+
+
+

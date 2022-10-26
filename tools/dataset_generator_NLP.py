@@ -31,7 +31,7 @@ If you want to generate unseen data, please set the colors and objects to the un
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    '/home/liuchang/DATA/rlbench_data/train_all_tasks',
+                    '/home/liuchang/DATA/rlbench_data/valid',
                     'Where to save the demos.')
 flags.DEFINE_list('tasks',[
                             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
@@ -44,8 +44,7 @@ flags.DEFINE_list('tasks',[
                             'open_drawer',
                             'open_door_complex'
                             ] ,
-                  'The tasks to collect. If empty, all tasks are collected.')
-                  
+                  'The tasks to collect. If empty, all tasks are collected.')               
 flags.DEFINE_list('image_size', [360, 360],
                   'The size of the images tp save.')
 flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
@@ -53,7 +52,7 @@ flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'but is faster.')
 flags.DEFINE_integer('processes', 32,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 20,
+flags.DEFINE_integer('episodes_per_task', 3,
                      'The number of episodes to collect per task.')
 flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')

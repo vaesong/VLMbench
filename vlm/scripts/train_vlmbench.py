@@ -34,7 +34,6 @@ import torch.nn.functional as F
 from vlm.scripts.VLDataloader_custom import VLM_dataset
 from pytorch_transformers import (BertConfig, BertTokenizer)
 import utils
-import torchvision.models as models
 from tensorboardX import SummaryWriter
 from pytorch_transformers import BertConfig
 from pytorch_transformers.modeling_bert import BertOnlyMLMHead
@@ -122,12 +121,6 @@ def main(args):
         criterion = nn.CrossEntropyLoss(ignore_index=-1)
         criterion2 = nn.SmoothL1Loss()
         
-        # resnet 152
-        resnet152 = models.resnet152(pretrained=True)
-        resnet152.fc = nn.Linear(2048,2048)
-        for parm in resnet152.parameters():
-                parm.requires_grad = False 
-        resnet152=resnet152.cuda()
                
         start_iter = 0
         
@@ -200,16 +193,7 @@ def main(args):
                                 visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long()
                         visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
 
-                        candidate_feat=[]
-                        for i in range(args.batch_size):
-                                rgb = img[i]
-                                rgb = rgb.permute(0,3,1,2).float() 
-                                img_feat = resnet152(rgb.cuda()).cpu().data.numpy()
-                                action_feat = np.repeat(batch_data["action"][i], 16, axis=1).numpy()
-                                img_feat = np.concatenate((img_feat,action_feat),axis=1) #repeat 8 dim action 16times to 128
-                                candidate_feat.append(img_feat)      
-                        candidate_feat = torch.from_numpy(np.array(candidate_feat)).cuda() 
-
+                        action =  batch_data["action"]
                         vln_bert.vln_bert.config.directions = args.maxAction
                         visual_inputs = {'mode':      'visual',
                                 'sentence':           language_features,
@@ -219,7 +203,9 @@ def main(args):
                                 'token_type_ids':     token_type_ids,
                                 # 'action_feats':       input_a_t,
                                 # 'pano_feats':         f_t,
-                                'cand_feats':         candidate_feat}
+                                'img':                img,
+                                "action_feats":       action        
+                                }
                         state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action= vln_bert(**visual_inputs)      
                         
                         if task == 'mlm': 

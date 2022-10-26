@@ -9,6 +9,8 @@ from param import args
 import math
 from vlnbert.vlnbert_init import get_vlnbert_models
 import einops
+import torchvision.models as models
+import numpy as np
 
 class VLNBERT(nn.Module):
     def __init__(self, feature_size=2048+128):
@@ -54,10 +56,17 @@ class VLNBERT(nn.Module):
         self.state_LayerNorm = BertLayerNorm(hidden_size, eps=layer_norm_eps)
         
         self.vision_encoder = VisionEncoder(self.vln_bert.config.img_feature_dim, self.vln_bert.config)
+                # resnet 152
+        resnet152 = models.resnet152(pretrained=True)
+        resnet152.fc = nn.Linear(2048,2048)
+        for parm in resnet152.parameters():
+                parm.requires_grad = False 
+        self.resnet152=resnet152.cuda()
+
 
     def forward(self, mode, sentence, token_type_ids=None,
                 attention_mask=None, lang_mask=None, vis_mask=None,
-                position_ids=None, action_feats=None, pano_feats=None, cand_feats=None,task=None):
+                position_ids=None, action_feats=None, pano_feats=None, img=None,task=None):
 
         if mode == 'language':
             init_state, encoded_sentence = self.vln_bert(mode, sentence, attention_mask=attention_mask, lang_mask=lang_mask)
@@ -72,7 +81,16 @@ class VLNBERT(nn.Module):
             # state_with_action = self.action_LayerNorm(state_with_action)
             # state_feats = torch.cat((state_with_action.unsqueeze(1), sentence[:,1:,:]), dim=1)
             state_feats = sentence
-            img_feats = self.vision_encoder(cand_feats.float())
+            candidate_feat=[]
+            for i in range(args.batch_size):
+                    rgb = img[i]
+                    rgb = rgb.permute(0,3,1,2).float() 
+                    img_feat = self.resnet152(rgb.cuda()).cpu().data.numpy()
+                    action_feat = np.repeat(action_feats[i], 16, axis=1).numpy()
+                    img_feat = np.concatenate((img_feat,action_feat),axis=1) #repeat 8 dim action 16times to 128
+                    candidate_feat.append(img_feat)      
+            candidate_feat = torch.from_numpy(np.array(candidate_feat)).cuda() 
+            img_feats = self.vision_encoder(candidate_feat.float())
             # if task == "action":
             #     input_tensor = einops.rearrange(x, "b t k -> (b t) k")
             #     ctx_tensor = einops.rearrange(x, "b t k -> (b t) k")
