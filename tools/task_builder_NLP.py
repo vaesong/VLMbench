@@ -25,11 +25,9 @@ from tools.task_validator import task_smoke, TaskValidationError
 
 CURRENT_DIR = dirname(abspath(__file__))
 
-
 def print_fail(message, end='\n'):
     message = str(message)
     sys.stderr.write('\x1b[1;31m' + message.strip() + '\x1b[0m' + end)
-
 
 def setup_list_completer(TASKS_PATH):
     task_files = [t.replace('.py', '') for t in os.listdir(TASKS_PATH)
@@ -45,7 +43,6 @@ def setup_list_completer(TASKS_PATH):
 
     readline.parse_and_bind("tab: complete")
     readline.set_completer(list_completer)
-
 
 class LoadedTask(object):
 
@@ -220,7 +217,6 @@ class LoadedTask(object):
         self.reload_python()
         self.save_task()
         print('Rename complete')
-
 
 if __name__ == '__main__':
     task_path = "./vlm/tasks"

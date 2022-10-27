@@ -116,16 +116,19 @@ def main(args):
         if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
         writer = SummaryWriter(log_dir=log_dir)
-                
+        argsDict = args.__dict__
+        with open(log_dir+'/setting.txt', 'w') as f:
+                f.writelines('------------------ start ------------------' + '\n')
+                for eachArg, value in argsDict.items():
+                        f.writelines(eachArg + ' : ' + str(value) + '\n')
+                # f.writelines('------------------- end -------------------')
 
         criterion = nn.CrossEntropyLoss(ignore_index=-1)
         criterion2 = nn.SmoothL1Loss()
-        
-               
+         
         start_iter = 0
         
         config = BertConfig.from_pretrained("/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997")
-
         config.img_feature_dim = args.vision_size
         config.img_feature_type = ""
         config.update_lang_bert = args.update
@@ -140,15 +143,14 @@ def main(args):
         base_vocab = ['<PAD>', '<UNK>', '<EOS>']
         padding_idx = base_vocab.index('<PAD>')
 
+        vln_bert = model_PREVALENT.VLNBERT().cuda()
+        # critic = model_PREVALENT.Critic().cuda()
+        optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
+
         
         if args.load is not None:
-                start_iter,vln_bert,optimizer = load(os.path.join(args.load))
+                start_iter,vln_bert,optimizer = load(args.load,vln_bert,optimizer)
                 print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
-                vln_bert=vln_bert.cuda()
-        else:
-                vln_bert = model_PREVALENT.VLNBERT().cuda()
-                # critic = model_PREVALENT.Critic().cuda()
-                optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
 
         vln_bert.train()
 
@@ -173,7 +175,6 @@ def main(args):
                                 task = "action"
                                 language = batch_data["language"]
                                 img = batch_data["traj"]
-
                         language_attention_mask = (language != padding_idx).long().cuda()
                         token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                                  
                         # initial

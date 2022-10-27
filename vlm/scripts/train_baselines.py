@@ -79,7 +79,6 @@ class MultiEpochsDataLoader(torch.utils.data.DataLoader):
         for i in range(len(self)):
             yield next(self.iterator)
 
-
 class _RepeatSampler(object):
     """ Sampler that repeats forever.
     Args:
@@ -107,6 +106,7 @@ def main(args):
     #     try: mp.set_start_method('spawn')
     #     except RuntimeError: print("multiprocessing method is already set.")
 
+    #如果没有设置数量，就自动检测
     ngpus_per_node = torch.cuda.device_count() if args.gpu_number==0 else args.gpu_number
     args.ngpus_per_node = ngpus_per_node
     # ngpus_per_node = 5
@@ -477,7 +477,7 @@ if __name__=="__main__":
                             'N processes per node, which has N GPUs. This is the '
                             'fastest way to use PyTorch for either single node or '
                             'multi node data parallel training')
-    parser.add_argument('--gpu_number', type=int, default=0)
+    parser.add_argument('--gpu_number', type=int, default=6)
     parser.add_argument('--gpu_start', type=int, default=0)
     args = parser.parse_args()
 

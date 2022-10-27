@@ -9,7 +9,7 @@ class Param:
         # General
         self.parser.add_argument('--test_only', type=int, default=0, help='fast mode for testing')
 
-        self.parser.add_argument('--iters', type=int, default=300000, help='training iterations')
+        self.parser.add_argument('--iters', type=int, default=500, help='training iterations')
         self.parser.add_argument('--name', type=str, default='default', help='experiment id')
         self.parser.add_argument('--vlnbert', type=str, default='prevalent', help='oscar or prevalent')
         self.parser.add_argument('--train', type=str, default='listener')
@@ -18,7 +18,6 @@ class Param:
         # Data preparation
         self.parser.add_argument('--maxInput', type=int, default=80, help="max input instruction")
         self.parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
-        self.parser.add_argument('--batchSize', type=int, default=8)
         self.parser.add_argument('--ignoreid', type=int, default=-100)
         self.parser.add_argument('--feature_size', type=int, default=2048)
         self.parser.add_argument("--loadOptim",action="store_const", default=False, const=True)
@@ -63,17 +62,17 @@ class Param:
         self.parser.add_argument('--data_dir',default="/home/liuchang/DATA/rlbench_data" ,type=str)
         self.parser.add_argument('--setd', type=str, default='train')
         self.parser.add_argument('--img_size',nargs='+', type=int, default=[360, 360])
-        self.parser.add_argument('--batch_size', type=int, default=16, metavar='N',
+        self.parser.add_argument('--batch_size', type=int, default=32, metavar='N',
                         help='input batch size for training (default: 8)')
-        self.parser.add_argument('--workers', type=int, default=4) #default=32
+        self.parser.add_argument('--workers', type=int, default=8) #default=32
         self.parser.add_argument('--preprocess', action='store_true', 
                 help="whether preprocess the data. Next time can directly use. Add if you don't want it.")
-        self.parser.add_argument('--unused_camera_list', nargs='+',default=[])
+        self.parser.add_argument('--unused_camera_list', nargs='+',default=['left_shoulder', 'right_shoulder', 'overhead','wrist'])
         # default=['left_shoulder', 'right_shoulder', 'overhead','wrist']
         self.parser.add_argument('--use_fail_cases', action='store_true', help="add if use the fail cases")
         self.parser.add_argument('--sample_numbers', type=int, default=0, help="downsample from total demonstrations")
         self.parser.add_argument('--pin_memory', action='store_true', help="do not use if the RAM is small")
-        self.parser.add_argument('--train_tasks', nargs='+', type=str, default ="drawer")
+        self.parser.add_argument('--train_tasks', nargs='+', type=str, default =None)
         self.parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
         self.parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=False)
         self.parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
@@ -111,7 +110,6 @@ class Param:
         self.parser.add_argument('--gpu_start', type=int, default=0)
 
         # HOP
-                #hop
         self.parser.add_argument("--model_type", default="bert", type=str,
                                 help="The model architecture to be fine-tuned.")
         self.parser.add_argument("--model_name_or_path", default="bert-base-uncased", type=str,

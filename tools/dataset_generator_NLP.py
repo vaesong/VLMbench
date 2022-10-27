@@ -33,26 +33,27 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('save_path',
                     '/home/liuchang/DATA/rlbench_data/valid',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks',[
-                            'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
-                            'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
-                            'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
-                            'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-                            'stack_cubes_color', 'stack_cubes_size',
-                            'stack_cubes_relative', 'stack_cubes_shape',
-                            'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-                            'open_drawer',
-                            'open_door_complex'
-                            ] ,
-                  'The tasks to collect. If empty, all tasks are collected.')               
+flags.DEFINE_list('tasks',['drop_pen_color', 'drop_pen_relative', 'drop_pen_size'] ,
+                  'The tasks to collect. If empty, all tasks are collected.')     
+                #   [
+                #             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
+                #             'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
+                #             'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
+                #             'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
+                #             'stack_cubes_color', 'stack_cubes_size',
+                #             'stack_cubes_relative', 'stack_cubes_shape',
+                #             'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
+                #             'open_drawer',
+                #             'open_door_complex'
+                #             ]          
 flags.DEFINE_list('image_size', [360, 360],
                   'The size of the images tp save.')
 flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'The renderer to use. opengl does not include shadows, '
                   'but is faster.')
-flags.DEFINE_integer('processes', 32,
+flags.DEFINE_integer('processes', 16,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 3,
+flags.DEFINE_integer('episodes_per_task', 5,
                      'The number of episodes to collect per task.')
 flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')

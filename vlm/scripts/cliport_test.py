@@ -189,7 +189,7 @@ def add_argments():
     parser.add_argument('--checkpoints_folder', type=str)
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
-    parser.add_argument('--gpu', type=int, default=7)
+    parser.add_argument('--gpu', type=int, default=6)
     parser.add_argument('--task', type=str, default=None)
     parser.add_argument('--recorder', type=bool, default=False)
     parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
@@ -239,11 +239,11 @@ if __name__=="__main__":
     renew_obs = args.renew_obs
     need_post_grap = True
     need_pre_move = False
-    if args.task == 'drop':
+    if args.task == 'drop': #
         task_files = ['drop_pen_color', 'drop_pen_relative', 'drop_pen_size']
-    elif args.task == 'pick':
+    elif args.task == 'pick': #
         task_files = ['pick_cube_shape', 'pick_cube_relative', 'pick_cube_color', 'pick_cube_size']
-    elif args.task == 'stack':
+    elif args.task == 'stack': 
         task_files = ['stack_cubes_color', 'stack_cubes_relative', 'stack_cubes_shape', 'stack_cubes_size']
     elif args.task == 'shape_sorter':
         need_pre_move = True
@@ -316,6 +316,7 @@ if __name__=="__main__":
             wandb.config.update(args)
         e_path = load_test_config(data_folder, task_files[i])
         success_times = 0
+        history_success = 0 # 测试
         grasp_success_times = 0
         all_time = 0
         task = env.get_task(task_to_train)
@@ -392,8 +393,6 @@ if __name__=="__main__":
                         successed = False
                         for action, collision_checking in zip(action_list,collision_checking_list):
                             obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
-                            if recorder is not None:
-                                recorder.take_snap()
                             if reward == 0.5:
                                 grasped = True
                             elif reward == 1:
@@ -413,8 +412,6 @@ if __name__=="__main__":
                 try:
                     for action, collision_checking in zip(action_list,collision_checking_list):
                         obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
-                        if recorder is not None:
-                            recorder.take_snap()
                         if reward == 1:
                             success_times+=1
                             break
@@ -422,9 +419,10 @@ if __name__=="__main__":
                             grasp_success_times += 1
                 except Exception as e:
                     print(e)
-            if recorder is not None:
-                # recorder.save(f"./records/error1_{task.get_name()}.avi")
+            if recorder is not None and success_times > history_success:
                 recorder.save(f"./records/{task.get_name()}/{num+1}.avi")
+                history_success = success_times
+
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
             file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")

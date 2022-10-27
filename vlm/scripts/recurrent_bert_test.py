@@ -163,12 +163,23 @@ class CliportAgent(object):
 class RecurrentBertAgent():
     def __init__(self,args=None) -> None:
         self.tok = BertTokenizer.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997')
-        self.vln_bert= model_PREVALENT.VLNBERT().cuda()
+        # self.vln_bert= model_PREVALENT.VLNBERT().cuda()
+        self.args = args
+        if args.load is not None:
+            start_iter,vln_bert,optimizer = load(os.path.join(args.load))
+            print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
+            self.vln_bert=vln_bert.cuda()
+        else:
+            self.vln_bert = model_PREVALENT.VLNBERT().cuda()
+            # critic = model_PREVALENT.Critic().cuda()
+            optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
+   
+    def set_param(self):
         for parm in self.vln_bert.parameters():
             parm.requires_grad = False 
         for parm in self.vln_bert.fc.parameters():
             parm.requires_grad = True 
-        self.args = args
+    
     def act(self,img,langauge,action_feat,state):
         '''
         obs:raw image sequence
@@ -179,14 +190,6 @@ class RecurrentBertAgent():
         temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
         instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
         language = self.tok.convert_tokens_to_ids(instr_tokens)
-        if args.load is not None:
-                start_iter,vln_bert,optimizer = load(os.path.join(args.load))
-                print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
-                vln_bert=vln_bert.cuda()
-        else:
-                vln_bert = model_PREVALENT.VLNBERT().cuda()
-                # critic = model_PREVALENT.Critic().cuda()
-                optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
         # language initial
         language_attention_mask = (language != 0).long().cuda()
         token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                                  
@@ -240,6 +243,7 @@ def add_argments():
     parser.add_argument('--data_folder', type=str)
     parser.add_argument('--setd', type=str, default="seen")
     parser.add_argument("--load", default=None, help='path of the trained model')
+    parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
@@ -259,8 +263,8 @@ def add_argments():
     return args
 
 if __name__=="__main__":
-    if not os.path.exists('./results'):
-        os.makedirs('./results')
+    if not os.path.exists('./results_recurrent_bert'):
+        os.makedirs('./results_recurrent_bert')
     args = add_argments()
     if args.wandb_entity is not None:
         import wandb
@@ -346,7 +350,7 @@ if __name__=="__main__":
 
     agent = RecurrentBertAgent()
 
-    output_file_name = f"./results/{args.model_name}_{args.task}_{args.setd}"
+    output_file_name = f"./results_recurrent_bert/{args.model_name}_{args.task}_{args.setd}"
     if args.goal_conditioned:
         output_file_name += "_goalcondition"
     if args.ignore_collision:
@@ -416,7 +420,7 @@ if __name__=="__main__":
                 state,action = agent.act(history_img,lang,history_action)
                 hidden_states.append(state)
                 actions.append(action)
-                obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
+                obs, reward, terminate = task.step(action,collision_checking=None,recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
                 rewards.append(reward)
                 if reward == 0.5:
                     grasped = True

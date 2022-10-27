@@ -69,6 +69,8 @@ class VLM_dataset(Dataset):
 
         self.views = list(set(['left_shoulder', 'right_shoulder', 'overhead', 'wrist', 'front']) - set(unused_camera_list))
 
+        self.camera=list(set(['left_shoulder', 'right_shoulder', 'overhead', 'wrist', 'front'])^set(unused_camera_list))
+
         if 'left_shoulder' in unused_camera_list:
             self.obs_config.left_shoulder_camera.set_all(False)
         if 'right_shoulder' in unused_camera_list:
@@ -79,7 +81,8 @@ class VLM_dataset(Dataset):
             self.obs_config.wrist_camera.set_all(False)
         if 'front' in unused_camera_list:
             self.obs_config.front_camera.set_all(False)
-        
+
+        # self.unused_camera_list = unused_camera_list
         self.relative = False
         self.renew_obs = False
         self.add_low_lang = True
@@ -124,7 +127,7 @@ class VLM_dataset(Dataset):
     
     def __getitem__(self, index):
         episode = self.episode_list[index]
-        output_dict = self.get_episode(episode)
+        output_dict = self.get_episode(episode,fake=False)
         # itm data 
         fake_episode = random.choice(self.episode_list)
         while str(episode.parents[2]).split("_")[:2] == str(fake_episode.parents[2]).split("_")[:2]: # do it untill their tasks are totally different
@@ -137,11 +140,11 @@ class VLM_dataset(Dataset):
                 output_dict["ismatch"] = ismatch
         elif prob_itm <= 1:
                 ismatch = 0
-                output_dict["random_traj"] = self.get_episode(fake_episode)["traj"]
+                output_dict["random_traj"] = self.get_episode(fake_episode,fake=True)["traj"]
                 output_dict["ismatch"] = ismatch           
         return output_dict
 
-    def get_episode(self,episode):
+    def get_episode(self,episode,fake):
         variation_path = episode.parents[1]
         task_name = episode.parents[2]
         fail_cases = 'fail_cases' in str(episode)
@@ -152,34 +155,29 @@ class VLM_dataset(Dataset):
         
         sequence_length = len(demo_temple._observations)
         obs_select_inds = np.arange(sequence_length)
-        if self.sample_numbers:
-            if self.random_sample:
-                obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
-            else:
-                obs_select_inds = obs_select_inds[0:self.sample_numbers]
-        split_by_waypoint = True
-        # 根据watpoints切分
-        # obs_select_inds：选择出每个waypoint的开始index
-        if split_by_waypoint:
-            lang = demo_temple.high_level_instructions[0]
-            obs_select_inds = [0]
-            previous_waypoint="waypoint0"
-            # all_way_points只存了分割点的waypoint
-            self.all_waypoints = [previous_waypoint]
-            for i, obs in enumerate(demo_temple._observations):
-                if obs.current_waypoint_name == previous_waypoint:
-                    continue
+        if fake == False:
+            if self.sample_numbers:
+                if self.random_sample:
+                    obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
                 else:
-                    previous_waypoint = obs.current_waypoint_name
-                    self.all_waypoints.append(previous_waypoint)
-                    obs_select_inds.append(i)
-                    lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
-            # for i in range(len(obs_select_inds)):
-            #     if i+1<len(obs_select_inds):
-            #         random_i = np.random.randint(obs_select_inds[i], obs_select_inds[i+1])
-            #     else:
-            #         random_i = np.random.randint(obs_select_inds[i], sequence_length)
-            #     obs_select_inds[i] = random_i
+                    obs_select_inds = obs_select_inds[0:self.sample_numbers]
+            split_by_waypoint = True
+            # 根据watpoints切分
+            # obs_select_inds：选择出每个waypoint的开始index
+            if split_by_waypoint:
+                lang = demo_temple.high_level_instructions[0]
+                obs_select_inds = [0]
+                previous_waypoint="waypoint0"
+                # all_way_points只存了分割点的waypoint
+                self.all_waypoints = [previous_waypoint]
+                for i, obs in enumerate(demo_temple._observations):
+                    if obs.current_waypoint_name == previous_waypoint:
+                        continue
+                    else:
+                        previous_waypoint = obs.current_waypoint_name
+                        self.all_waypoints.append(previous_waypoint)
+                        obs_select_inds.append(i)
+                        lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
         if self.preprocess:
             preprocess_data_folder = self.dataset_path/episode/'preprocess_data'
 
@@ -228,33 +226,12 @@ class VLM_dataset(Dataset):
             # episode_number = int(episode.name.replace('episode',''))
             episode_name = episode.name
             variation_number = int(variation_path.name.replace('variation',''))
-            # demos = get_stored_demos(1, False, self.dataset_path, variation_number, 
-            #                         task_name, self.obs_config, episode_name, fail_cases, obs_select_inds)
-            # demos = get_stored_demos_nodepth(1, False, self.dataset_path, variation_number, 
-            #                         task_name, self.obs_config , episode_name)            
-            # data = demos[0]
-            # obs = data._observations
-            #拿到waypoint切割点obs_select_inds的observation
-            # obs = [obs[i] for i in obs_select_inds]
+
             key_frames = keypoint_discovery(demo_temple._observations)
             action=[]
             traj=[]
             select_frames=[]
-            # 用于策略训练
-            # while i < sequence_length-sperate:
-            #     frame_img=[]
-            #     frame_state=[]
-            #     for spe in range(sperate): # 间隔5帧取图片
-            #         frame_img.append(obs[i+spe].front_rgb)#torch.from_numpy(np.array(i[t])).permute(0,3,2,1).float()
-            #         frame_state.append(obs[i+spe].gripper_pose)
-            #     i=i+sperate 
-            #     if i < sequence_length:
-            #         target.append(np.append((obs[i].gripper_pose-obs[i-sperate].gripper_pose),(obs[i].gripper_open)))
-            #     else:
-            #         target.append(target[-1])
-            #     img.append(frame_img)
-            #     state.append(frame_state)
-                
+
             # 获取抽样轨迹  
             max_traj_len= self.args.maxAction
             if 0 not in key_frames:
@@ -280,6 +257,9 @@ class VLM_dataset(Dataset):
             demos = get_stored_demos_nodepth(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
 
+            data = demos[0]
+            obs = data._observations
+
             for frame in select_frames:
                 obs=demos[0]._observations[frame]
                 action.append((np.append(obs.gripper_pose,obs.gripper_open)))
@@ -287,7 +267,11 @@ class VLM_dataset(Dataset):
             while len(traj) < max_traj_len: # padding to max_traj_len
                 action.append(action[-1])
                 traj.append(traj[-1])
-
+            if fake == True:
+                output_dict = {
+                # "img":img,
+                "traj": np.array(traj)}
+                return output_dict
                   
             random_history_index=random.randint(1,valid_action_length-1)
             action_label = action[random_history_index]
@@ -303,7 +287,7 @@ class VLM_dataset(Dataset):
             instr_tokens=self.tokenizer.convert_tokens_to_ids(instr_tokens)
             
             # mask tokens
-            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer)
+            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer,self.args)
             output_dict = {
                 # "img":img,
                 "traj": np.array(traj),
@@ -319,8 +303,6 @@ class VLM_dataset(Dataset):
             }
             return output_dict
     
-
-
     @staticmethod
     def depth2normal(d_im):
         d_im = d_im.astype("float32")

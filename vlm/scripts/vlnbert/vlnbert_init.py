@@ -37,8 +37,8 @@ def get_vlnbert_models(args, config=None):
         vis_config = config_class.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/bert_config.json')
         vis_config.img_feature_dim = 2176
         vis_config.img_feature_type = ""
-        vis_config.vl_layers = 4
-        vis_config.la_layers = 9
+        vis_config.vl_layers = args.vl_layers
+        vis_config.la_layers = args.la_layers
 
         visual_model = model_class.from_pretrained(model_name_or_path, config=vis_config)
 
