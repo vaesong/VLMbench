@@ -173,6 +173,7 @@ class RecurrentBertAgent():
             self.vln_bert = model_PREVALENT.VLNBERT().cuda()
             # critic = model_PREVALENT.Critic().cuda()
             optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
+        self.set_param()
    
     def set_param(self):
         for parm in self.vln_bert.parameters():
@@ -348,7 +349,7 @@ if __name__=="__main__":
     # else:
     #     agent = ReplayAgent()
 
-    agent = RecurrentBertAgent()
+    agent = RecurrentBertAgent(args)
 
     output_file_name = f"./results_recurrent_bert/{args.model_name}_{args.task}_{args.setd}"
     if args.goal_conditioned:

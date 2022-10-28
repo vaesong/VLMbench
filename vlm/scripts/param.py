@@ -53,6 +53,7 @@ class Param:
 
         # Model hyper params:
         self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=4)
+        self.parser.add_argument("--action_repeat", type=int, default=16)
 
         # A2C
         self.parser.add_argument("--gamma", default=0.9, type=float)
@@ -62,7 +63,7 @@ class Param:
         self.parser.add_argument('--data_dir',default="/home/liuchang/DATA/rlbench_data" ,type=str)
         self.parser.add_argument('--setd', type=str, default='train')
         self.parser.add_argument('--img_size',nargs='+', type=int, default=[360, 360])
-        self.parser.add_argument('--batch_size', type=int, default=32, metavar='N',
+        self.parser.add_argument('--batch_size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 8)')
         self.parser.add_argument('--workers', type=int, default=8) #default=32
         self.parser.add_argument('--preprocess', action='store_true', 
@@ -78,7 +79,7 @@ class Param:
         self.parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
         #traning
         self.parser.add_argument('--start_epoch', default=0, type=int)
-        self.parser.add_argument('--log_every', default=50, type=int,
+        self.parser.add_argument('--log_every', default=25, type=int,
                                 help='Print log message at this many iterations (default: 10)')
         self.parser.add_argument('--log-freq', default=1, type=int,
                                 help='Print log message at this many iterations (default: 1)')
@@ -93,20 +94,20 @@ class Param:
         self.parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the training. Project Name")
 
         #distributed training
-        self.parser.add_argument('--world-size', default=-1, type=int,
+        self.parser.add_argument('--world-size', default=1, type=int,
                 help='number of nodes for distributed training')
-        self.parser.add_argument('--rank', default=-1, type=int,
+        self.parser.add_argument('--rank', default=0, type=int,
                         help='node rank for distributed training')
-        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23456', type=str,
+        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23457', type=str,
                         help='url used to set up distributed training')
         self.parser.add_argument('--dist-backend', default='nccl', type=str,
                         help='distributed backend')
-        self.parser.add_argument('--multiprocessing-distributed', action='store_true',
+        self.parser.add_argument('--distributed', action='store_true',
                         help='Use multi-processing distributed training to launch '
                                 'N processes per node, which has N GPUs. This is the '
                                 'fastest way to use PyTorch for either single node or '
                                 'multi node data parallel training')
-        self.parser.add_argument('--gpu_number', type=int, default=0)
+        self.parser.add_argument('--gpu_number', type=int, default=2)
         self.parser.add_argument('--gpu_start', type=int, default=0)
 
         # HOP

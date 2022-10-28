@@ -61,7 +61,7 @@ class VLNBERT(nn.Module):
         resnet152.fc = nn.Linear(2048,2048)
         for parm in resnet152.parameters():
                 parm.requires_grad = False 
-        self.resnet152=resnet152.cuda()
+        self.resnet152=resnet152
 
 
     def forward(self, mode, sentence, token_type_ids=None,
@@ -74,22 +74,20 @@ class VLNBERT(nn.Module):
 
         elif mode == 'visual':
             
-
             # state_action_embed = torch.cat((sentence[:,0,:], action_feats), 1)
             # state_action_embed =sentence[:,0,:]
             # state_with_action = self.action_state_project(state_action_embed)
             # state_with_action = self.action_LayerNorm(state_with_action)
             # state_feats = torch.cat((state_with_action.unsqueeze(1), sentence[:,1:,:]), dim=1)
             state_feats = sentence
-            candidate_feat=[]
+            candidate_feat=torch.zeros([args.batch_size,args.maxAction,2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
             for i in range(args.batch_size):
-                    rgb = img[i]
-                    rgb = rgb.permute(0,3,1,2).float() 
-                    img_feat = self.resnet152(rgb.cuda()).cpu().data.numpy()
-                    action_feat = np.repeat(action_feats[i], 16, axis=1).numpy()
-                    img_feat = np.concatenate((img_feat,action_feat),axis=1) #repeat 8 dim action 16times to 128
-                    candidate_feat.append(img_feat)      
-            candidate_feat = torch.from_numpy(np.array(candidate_feat)).cuda() 
+                rgb = img[i].permute(0,3,1,2).float() 
+                rgb = self.resnet152(rgb)
+                action_feat = action_feats[i].repeat(1,args.action_repeat)
+                img_feat = torch.cat([rgb,action_feat],dim =1)  # torch.Size([12, 360, 360, 3])， torch.Size([12, 128]) 
+                candidate_feat[i] = img_feat   
+            candidate_feat = candidate_feat
             img_feats = self.vision_encoder(candidate_feat.float())
             # if task == "action":
             #     input_tensor = einops.rearrange(x, "b t k -> (b t) k")

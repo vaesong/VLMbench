@@ -33,7 +33,11 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('save_path',
                     '/home/liuchang/DATA/rlbench_data/valid',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks',['drop_pen_color', 'drop_pen_relative', 'drop_pen_size'] ,
+flags.DEFINE_list('tasks',[ 'stack_cubes_color', 'stack_cubes_size',
+                            'stack_cubes_relative', 'stack_cubes_shape',
+                            'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
+                            'open_drawer',
+                            'open_door_complex'] ,
                   'The tasks to collect. If empty, all tasks are collected.')     
                 #   [
                 #             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',

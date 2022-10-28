@@ -69,7 +69,7 @@ class VLM_dataset(Dataset):
 
         self.views = list(set(['left_shoulder', 'right_shoulder', 'overhead', 'wrist', 'front']) - set(unused_camera_list))
 
-        self.camera=list(set(['left_shoulder', 'right_shoulder', 'overhead', 'wrist', 'front'])^set(unused_camera_list))
+        # self.camera=list(set(['left_shoulder', 'right_shoulder', 'overhead', 'wrist', 'front'])^set(unused_camera_list))
 
         if 'left_shoulder' in unused_camera_list:
             self.obs_config.left_shoulder_camera.set_all(False)
@@ -241,7 +241,7 @@ class VLM_dataset(Dataset):
                     select_frames.append(frame)
             # add end obs to max_traj_len
             if (sequence_length-1) not in select_frames:
-                select_frames.append()(sequence_length-1)
+                select_frames.append(sequence_length-1)
             
             sperate_index = max_sperate_index(select_frames)
             range1 = select_frames[sperate_index-1]
@@ -257,13 +257,13 @@ class VLM_dataset(Dataset):
             demos = get_stored_demos_nodepth(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
 
-            data = demos[0]
-            obs = data._observations
-
             for frame in select_frames:
                 obs=demos[0]._observations[frame]
                 action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                traj.append(obs.front_rgb)
+                rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
+                for rgb in rgbs:
+                    if rgb is not None:
+                        traj.append(rgb)
             while len(traj) < max_traj_len: # padding to max_traj_len
                 action.append(action[-1])
                 traj.append(traj[-1])
@@ -278,7 +278,6 @@ class VLM_dataset(Dataset):
             # history_traj = copy.deepcopy(traj)[:]
             # action = action[random_history_index]
 
-            
             maxlength=self.args.maxInput
             # original tokens
             instr_tokens = self.tokenizer.tokenize(lang)
