@@ -232,19 +232,16 @@ class VLM_dataset(Dataset):
             traj=[]
             select_frames=[]
 
-            # 删
-            # key_frames = obs_select_inds
-
             # 获取抽样轨迹  
             max_traj_len= self.args.maxAction
             if 0 not in key_frames:
-                select_frames.append(0)#加上第一个关键帧
+                select_frames.append(0)
             for frame in key_frames:
                 if frame not in select_frames:
                     select_frames.append(frame)
             # add end obs to max_traj_len
             if (sequence_length-1) not in select_frames:
-                select_frames.append(sequence_length-1)#加上最后一个关键帧
+                select_frames.append(sequence_length-1)
             
             sperate_index = max_sperate_index(select_frames)
             range1 = select_frames[sperate_index-1]
@@ -257,19 +254,42 @@ class VLM_dataset(Dataset):
 
             valid_action_length = len(select_frames)
 
-            demos = get_stored_demos_nodepth(1, False, self.dataset_path, variation_number, 
+            demos = get_stored_demos(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
 
+            rgb = []
+            rgbs = []
+            pcd = []
+            pcds = []
             for frame in select_frames:
                 obs=demos[0]._observations[frame]
                 action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
-                for rgb in rgbs:
-                    if rgb is not None:
-                        traj.append(rgb)
+                for i in range(0,3):
+                    rgb.append(obs.front_rgb)
+                    rgb.append(obs.overhead_rgb)
+                    rgb.append(obs.wrist)
+                    pcd.append(obs.front_point_cloud)
+                    pcd.append(obs.overhead_point_cloud)
+                    pcd.append(obs.wrist_point_cloud)
+
+                rgbs.append(rgb)
+                pcds.append(pcd)
+                # rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
+                # for rgb in rgbs:
+                #     if rgb is not None:
+                #         traj.append(rgb)
+
+            action = action[:-1]
+            pad_len = max_traj_len - len(traj)
+            padding_mask = list([True] * valid_action_length + [False] * pad_len)
             while len(traj) < max_traj_len: # padding to max_traj_len
                 action.append(action[-1])
                 traj.append(traj[-1])
+                rgbs.append(rgbs[-1])
+                pcds.append(pcds[-1])
+                
+                
+            
             if fake == True:
                 output_dict = {
                 # "img":img,
@@ -289,7 +309,7 @@ class VLM_dataset(Dataset):
             instr_tokens=self.tokenizer.convert_tokens_to_ids(instr_tokens)
             
             # mask tokens
-            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer)
+            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer,self.args)
             output_dict = {
                 # "img":img,
                 "traj": np.array(traj),
@@ -300,8 +320,11 @@ class VLM_dataset(Dataset):
                 "random_history_index":random_history_index,
                 "valid_length":valid_action_length,
                 "action":np.array(action),
-                "action_label":action_label
+                "action_label":action_label,
                 # "state":state,
+                "rgbs": np.array(rgbs),
+                "pcds": np.array(pcds),
+                "padding_mask": np.array(padding_mask),
             }
             return output_dict
     

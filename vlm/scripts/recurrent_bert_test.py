@@ -1,30 +1,36 @@
+
 import argparse
-from distutils.util import strtobool
-from pathlib import Path
 import os
 import random
+from distutils.util import strtobool
+from pathlib import Path
+
 import cv2
-from cliport.agent import ImgDepthAgent_6dof, TwoStreamClipLingUNetLatTransporterAgent, BlindLangAgent_6Dof
-from amsolver.environment import Environment
-from amsolver.action_modes import ArmActionMode, ActionMode
-from amsolver.observation_config import ObservationConfig
+import model_PREVALENT
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from scipy.spatial.transform import Rotation as R
+import torchvision.models as models
+import utils
+from num2words import num2words
+from pyrep.const import RenderMode
 from pyrep.objects.dummy import Dummy
 from pyrep.objects.vision_sensor import VisionSensor
-from pyrep.const import RenderMode
-from amsolver.utils import get_stored_demos
-from amsolver.backend.utils import task_file_to_task_class
-from num2words import num2words
-from pytorch_transformers import  BertTokenizer
-import torchvision.models as models
-import torch.nn as nn
-import model_PREVALENT
-from train_vlmbench import load
+from pytorch_transformers import BertTokenizer
+from scipy.spatial.transform import Rotation as R
 from torch.autograd import Variable
-import utils
+from train_vlmbench import load
+
+from amsolver.action_modes import ActionMode, ArmActionMode
+from amsolver.backend.utils import task_file_to_task_class
+from amsolver.environment import Environment
+from amsolver.observation_config import ObservationConfig
+from amsolver.utils import get_stored_demos
+from cliport.agent import (BlindLangAgent_6Dof, ImgDepthAgent_6dof,
+                           TwoStreamClipLingUNetLatTransporterAgent)
+
+
 # from param import args
 # from pyvirtualdisplay import Display
 # disp = Display().start()
@@ -166,8 +172,11 @@ class RecurrentBertAgent():
         # self.vln_bert= model_PREVALENT.VLNBERT().cuda()
         self.args = args
         if args.load is not None:
-            start_iter,vln_bert,optimizer = load(os.path.join(args.load))
-            print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
+            vln_bert = model_PREVALENT.VLNBERT().cuda()
+            # critic = model_PREVALENT.Critic().cuda()
+            optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
+            start_iter,vln_bert,optimizer = load(os.path.join(args.load),vln_bert,optimizer)
+            print("\nLOAD the model from {}, iteration {} ".format(args.load, start_iter))
             self.vln_bert=vln_bert.cuda()
         else:
             self.vln_bert = model_PREVALENT.VLNBERT().cuda()
@@ -179,21 +188,23 @@ class RecurrentBertAgent():
         for parm in self.vln_bert.parameters():
             parm.requires_grad = False 
         for parm in self.vln_bert.fc.parameters():
-            parm.requires_grad = True 
+            parm.requires_grad = False 
     
-    def act(self,img,langauge,action_feat,state):
+    def act(self,img,langauge,action_feat,state,step_list,use_gt_xy=False,use_gt_z=False, use_gt_theta=False, use_gt_roll_pitch=False):
         '''
         obs:raw image sequence
         langauge :raw language
         action_feat : gripper_pose+gripper_open
         '''
+        current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step_list
         lang_tokens = self.tok.tokenize(langauge)
         temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
         instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
         language = self.tok.convert_tokens_to_ids(instr_tokens)
         # language initial
-        language_attention_mask = (language != 0).long().cuda()
-        token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                                  
+        language=torch.tensor(language,dtype=torch.long).unsqueeze(0)
+        language_attention_mask = (language != 0).cuda()
+        token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                   
         language_inputs = {'mode':'language',
         'sentence':       Variable(language, requires_grad=False).long().cuda(),
         'attention_mask': language_attention_mask,
@@ -201,11 +212,19 @@ class RecurrentBertAgent():
         'token_type_ids': token_type_ids}
         h_t, language_features = self.vln_bert(**language_inputs)
         if state is not None:
+            language_features = torch.cat((state.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+        else:
             language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
 
-        visual_temp_mask=torch.tensor([1]*len(img)).long()
+        visual_temp_mask=(utils.length2mask([len(img)],12) == 0).long().cuda()
+        img_padding = img[:]
+        action_feat_padding = action_feat[:]
+        while len(img_padding) < 12:
+            img_padding.append(img[-1])
+            action_feat_padding.append(action_feat[-1])
         visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
-        img = np.array(img)
+        img = torch.from_numpy(np.array(img_padding)).unsqueeze(0).cuda()
+        action_feat=torch.from_numpy(np.array(action_feat_padding)).unsqueeze(0).cuda()
         visual_inputs = {
                 'mode':               'visual',
                 'sentence':           language_features,
@@ -219,6 +238,25 @@ class RecurrentBertAgent():
                 "action_feats":       action_feat        
         }
         state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action= self.vln_bert(**visual_inputs)
+        action = action[0].cpu().numpy()
+        if action[-1] < 0.5:
+            action[-1] = 0
+        else:
+            action[-1] = 1
+        if use_gt_xy:
+            action[:2]=gt_pose[:2]
+        if use_gt_z:
+            action[2]=gt_pose[2]
+        if action[2] <0.75 or action[2] >1.41 :
+            action[2] = random.uniform(0.76,1.5)
+        if use_gt_theta and use_gt_roll_pitch:
+            rotation = R.from_quat(gt_pose[3:]).as_euler('zyx')
+            action[3:7] = R.from_euler("zyx",rotation).as_quat()
+            action[7] = gripper_control
+        else:
+            rotation=R.from_quat(action[3:7]).as_euler('zyx')
+            action[3:7] = R.from_euler("zyx",rotation).as_quat()
+        
         return state_proj,action
       
 def load_test_config(data_folder: Path, task_name):
@@ -241,23 +279,23 @@ def set_seed(seed, torch=False):
 def add_argments():
     parser = argparse.ArgumentParser(description='')
     #dataset
-    parser.add_argument('--data_folder', type=str)
+    parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/test")
     parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument("--load", default=None, help='path of the trained model')
+    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/snap/drawer_overhead/state_dict/LAST_iter300", help='path of the trained model')
     parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
     parser.add_argument('--gpu', type=int, default=7)
     parser.add_argument('--language_padding', type=int, default=80)
-    parser.add_argument('--task', type=str, default=None)
+    parser.add_argument('--task', type=str, default="drawer")
     parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
     parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the test results. Project Name")
     args = parser.parse_args()
@@ -338,6 +376,8 @@ if __name__=="__main__":
 
     if args.recorder:
         recorder = Recorder()
+    else:
+        recorder = None
 
     train_tasks = [task_file_to_task_class(t, parent_folder = 'vlm') for t in task_files]
     data_folder = Path(os.path.join(args.data_folder, args.setd))
@@ -379,10 +419,17 @@ if __name__=="__main__":
             waypoints_info = {name: obj for name, obj in obs.object_informations.items() if "waypoint" in name}
             all_time+=1
             high_descriptions = descriptions[0]
-            if high_descriptions[-1]!=".":
-                high_descriptions+="."
-            target_grasp_obj_name = None
+            
+            step=0
+            if args.add_low_lang:
+                for waypoint in waypoints_info:
+                    if "low_level_descriptions" in waypoints_info[waypoint]:
+                        high_descriptions = high_descriptions+f" Step {num2words(step)}:"
+                        high_descriptions += waypoints_info[waypoint]["low_level_descriptions"]
+                        step+=1
+            print(high_descriptions)
 
+            target_grasp_obj_name = None
             try:
                 if len(waypoints_info['waypoint1']['target_obj_name'])!=0:
                     target_grasp_obj_name = waypoints_info['waypoint1']['target_obj_name']
@@ -402,33 +449,36 @@ if __name__=="__main__":
             except:
                 print(f"need re-generate: {e}")
                 continue
-            
             step_list = CliportAgent.generate_action_list(waypoints_info, args)
-            for i, sub_step in enumerate(step_list):
-                lang = lang+f" Step {num2words(i)}."
-                if args.add_low_lang:
-                    lang += sub_step[1]
-            print(lang)
-            
             history_img = []
             history_action = []
             hidden_states = []
             rewards=[]
             actions=[]
+            state= None
+            use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch = False ,False,False,False
             for i in range(args.maxAction):
                 history_img.append(obs.front_rgb)
                 history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                state,action = agent.act(history_img,lang,history_action)
-                hidden_states.append(state)
+                if i == 0:
+                    use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch=True,True,True,True
+                else:
+                    use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch=False,False,False,False
+                if i < len(step_list):
+                    step = step_list[i]
+                state,action = agent.act(history_img,high_descriptions,history_action,state,step,use_gt_xy,use_gt_z,use_gt_theta, use_gt_roll_pitch)
+                hidden_states.append(state.cpu().numpy())
                 actions.append(action)
                 obs, reward, terminate = task.step(action,collision_checking=None,recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
                 rewards.append(reward)
                 if reward == 0.5:
                     grasped = True
+                    grasp_success_times+=1
                 elif reward == 1:
                     success_times+=1
                     successed = True
                     break
+            recorder.save(f"./records/{task.get_name()}/{num+1}.avi")
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
             file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")

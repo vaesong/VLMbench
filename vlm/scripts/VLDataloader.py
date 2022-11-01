@@ -22,7 +22,7 @@ class VLM_dataset(Dataset):
                     use_fail_cases = True, sample_numbers = None, train_tasks = None, random_sample = False, args=None):
         self.root = root
         self.setd = setd
-        self.dataset_path = Path(os.path.join(self.root, self.setd))
+        self.dataset_path = Path(os.path.join(self.root, self.setd))#数据集路径
         self.episode_list = []
         self.variation_list = []
         self.task_list = {}
@@ -31,10 +31,10 @@ class VLM_dataset(Dataset):
         self.use_fail_cases = use_fail_cases
         if train_tasks is not None:
             self.episode_list = []
-            for t in train_tasks:
-                for n in self.task_list:
+            for t in train_tasks:#原来的任务
+                for n in self.task_list:#所有的任务
                     if t in n:
-                        self.episode_list += self.task_list[n]['success']
+                        self.episode_list += self.task_list[n]['success']#拿到一个任务的所有成功的episode
                         self.fail_cases_list += self.task_list[n]['fail']
         if use_fail_cases:
             self.episode_list += self.fail_cases_list
@@ -76,7 +76,7 @@ class VLM_dataset(Dataset):
             self.add_low_lang = args.add_low_lang
 
     def read_lists(self):
-        tasks_list_path = self.dataset_path / '{}_list.pkl'.format(self.setd)
+        tasks_list_path = self.dataset_path / '{}_list.pkl'.format(self.setd)#pkl的路径
         if not tasks_list_path.is_file():
             self.task_list = {}
             self.variation_list =set()

@@ -29,16 +29,22 @@ class VLNBERT(nn.Module):
         
         self.bert_size = 768
         self.action_size = 7
+        # self.fc = nn.Sequential(
+        #     nn.Linear(768, 128), 
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #     nn.Linear(128,32),
+        #     nn.BatchNorm1d(32),
+        #     nn.ReLU(),
+        #     nn.Linear(32,8),
+        #     )
         self.fc = nn.Sequential(
             nn.Linear(768, 128), 
-            nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Linear(128,32),
-            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Linear(32,8),
             )
-        
         # self.mlm_fc = nn.Sequential(
         #     nn.Linear(768, 128), 
         #     nn.ReLU(),

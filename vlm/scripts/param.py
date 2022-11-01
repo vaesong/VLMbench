@@ -7,53 +7,33 @@ class Param:
         self.parser = argparse.ArgumentParser(description="")
 
         # General
-        self.parser.add_argument('--test_only', type=int, default=0, help='fast mode for testing')
-
         self.parser.add_argument('--iters', type=int, default=500, help='training iterations')
         self.parser.add_argument('--name', type=str, default='default', help='experiment id')
         self.parser.add_argument('--vlnbert', type=str, default='prevalent', help='oscar or prevalent')
-        self.parser.add_argument('--train', type=str, default='listener')
-        self.parser.add_argument('--description', type=str, default='no description\n')
 
         # Data preparation
+        self.parser.add_argument('--batch_size', type=int, default=1, metavar='N',
+                        help='input batch size for training (default: 8)')
+        self.parser.add_argument('--workers', type=int, default=8) #default=32
         self.parser.add_argument('--maxInput', type=int, default=80, help="max input instruction")
         self.parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
         self.parser.add_argument('--ignoreid', type=int, default=-100)
-        self.parser.add_argument('--feature_size', type=int, default=2048)
         self.parser.add_argument("--loadOptim",action="store_const", default=False, const=True)
 
         # Load the model from
         self.parser.add_argument("--load", default=None, help='path of the trained model')
 
-        # Augmented Paths from
-        self.parser.add_argument("--aug", default=None)
-
-        # Listener Model Config
-        self.parser.add_argument("--zeroInit", dest='zero_init', action='store_const', default=False, const=True)
-        self.parser.add_argument("--mlWeight", dest='ml_weight', type=float, default=0.20)
-        self.parser.add_argument("--teacherWeight", dest='teacher_weight', type=float, default=1.)
-        self.parser.add_argument("--features", type=str, default='places365')
-
         # Dropout Param
         self.parser.add_argument('--dropout', type=float, default=0.5)
         self.parser.add_argument('--featdropout', type=float, default=0.3)
 
-        # Submision configuration
-        self.parser.add_argument("--submit", type=int, default=0)
-
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam
         self.parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
-        self.parser.add_argument('--decay', dest='weight_decay', type=float, default=0.)
-        self.parser.add_argument('--feedback', type=str, default='sample',
-                            help='How to choose next position, one of ``teacher``, ``sample`` and ``argmax``')
-        self.parser.add_argument('--teacher', type=str, default='final',
-                            help="How to get supervision. one of ``next`` and ``final`` ")
-        self.parser.add_argument('--epsilon', type=float, default=0.1)
 
         # Model hyper params:
-        self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=4)
         self.parser.add_argument("--action_repeat", type=int, default=16)
+        self.parser.add_argument("--angle_feat_size", type=int, default=128)
 
         # A2C
         self.parser.add_argument("--gamma", default=0.9, type=float)
@@ -63,13 +43,11 @@ class Param:
         self.parser.add_argument('--data_dir',default="/home/liuchang/DATA/rlbench_data" ,type=str)
         self.parser.add_argument('--setd', type=str, default='train')
         self.parser.add_argument('--img_size',nargs='+', type=int, default=[360, 360])
-        self.parser.add_argument('--batch_size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 8)')
-        self.parser.add_argument('--workers', type=int, default=8) #default=32
+
         self.parser.add_argument('--preprocess', action='store_true', 
                 help="whether preprocess the data. Next time can directly use. Add if you don't want it.")
-        self.parser.add_argument('--unused_camera_list', nargs='+',default=['left_shoulder', 'right_shoulder', 'overhead','wrist'])
-        # default=['left_shoulder', 'right_shoulder', 'overhead','wrist']
+        self.parser.add_argument('--unused_camera_list', nargs='+',default=['left_shoulder', 'right_shoulder', 'front','wrist'])
+        # default=['left_shoulder', 'right_shoulder', 'overhead','wrist','front']
         self.parser.add_argument('--use_fail_cases', action='store_true', help="add if use the fail cases")
         self.parser.add_argument('--sample_numbers', type=int, default=0, help="downsample from total demonstrations")
         self.parser.add_argument('--pin_memory', action='store_true', help="do not use if the RAM is small")
@@ -98,7 +76,7 @@ class Param:
                 help='number of nodes for distributed training')
         self.parser.add_argument('--rank', default=0, type=int,
                         help='node rank for distributed training')
-        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23457', type=str,
+        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23459', type=str,
                         help='url used to set up distributed training')
         self.parser.add_argument('--dist-backend', default='nccl', type=str,
                         help='distributed backend')

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from param import args
+# from param import args
 
 # Identify way-point in each RLBench Demo
 def _is_stopped(demo, i, obs, stopped_buffer):
@@ -48,14 +48,14 @@ def max_sperate_index(inputs):
                 max_index = i
     return max_index
 
-def mask_tokens(inputs, tokenizer,args):
+def mask_tokens(inputs, tokenizer):
 
     """ Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original. """
 
     labels = inputs.clone()
 
     # We sample a few tokens in each sequence for masked-LM training (with probability args.mlm_probability defaults to 0.15 in Bert/RoBERTa)
-    probability_matrix = torch.full(labels.shape, args.mlm_probability)
+    probability_matrix = torch.full(labels.shape, 0.15)
     # probability_matrix = torch.full(labels.shape, 0.15)    
     special_tokens_mask = [val in tokenizer.all_special_ids for val in labels.tolist()]#特殊字符
     # att_mask = [val == tokenizer.pad_token_id for val in labels.tolist()]#是否是att_mask

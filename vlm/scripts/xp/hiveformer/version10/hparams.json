@@ -1,0 +1,80 @@
+{
+    "accumulate_grad_batches": 1,
+    "arch": "mct",
+    "batch_size": 16,
+    "cache_size": 100,
+    "cameras": {
+        "_type": "tuple",
+        "_value": [
+            "wrist",
+            "left_shoulder",
+            "right_shoulder"
+        ]
+    },
+    "checkpoint": null,
+    "checkpoint_period": 10,
+    "depth": 4,
+    "device": "cuda",
+    "dim_feedforward": 64,
+    "distributed": false,
+    "headless": false,
+    "hidden_dim": 64,
+    "img_size": [
+        360,
+        360
+    ],
+    "instr_size": 512,
+    "instructions": null,
+    "jitter": false,
+    "lr": 0.001,
+    "mask_obs_prob": 0.0,
+    "max_episodes_per_taskvar": 100,
+    "max_tries": 10,
+    "name": "hiveformer",
+    "num_layers": 1,
+    "num_words": 53,
+    "num_workers": 5,
+    "output": {
+        "_type": "python_object (type = PosixPath)",
+        "_value": "gANjcGF0aGxpYgpQb3NpeFBhdGgKcQAoWAEAAAAvcQFYBAAAAGhvbWVxAlgIAAAAbGl1Y2hhbmdxA1gIAAAAcHJvamVjdHNxBFgIAAAAVkxNYmVuY2hxBWgFWAMAAAB2bG1xBlgHAAAAc2NyaXB0c3EHWAsAAAByZWNvcmRzLnR4dHEIdHEJUnEKLg=="
+    },
+    "preprocess": false,
+    "reproducibility": {
+        "command_line": "python /home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/train_hiverformer.py --tasks drawer --train_dir /home/liuchang/DATA/rlbench_data --valid_dir /home/liuchang/DATA/rlbench_data",
+        "git_has_uncommitted_changes": true,
+        "git_root": "/data2/liuchang/projects/VLMbench/VLMbench",
+        "git_url": "https://github.com/vaesong/VLMbench/tree/baae4a000ee082b7bf9e257e2368df50e8797fe5",
+        "time": "Mon Oct 31 22:37:13 2022"
+    },
+    "sample_numbers": 0,
+    "seed": 2,
+    "tasks": "drawer",
+    "train_dir": {
+        "_type": "python_object (type = PosixPath)",
+        "_value": "gANjcGF0aGxpYgpQb3NpeFBhdGgKcQAoWAEAAAAvcQFYBAAAAGhvbWVxAlgIAAAAbGl1Y2hhbmdxA1gEAAAAREFUQXEEWAwAAABybGJlbmNoX2RhdGFxBXRxBlJxBy4="
+    },
+    "train_iters": 100000,
+    "unused_camera_list": [
+        "left_shoulder",
+        "right_shoulder"
+    ],
+    "use_fail_cases": false,
+    "val_batch_size": 100,
+    "val_freq": 200,
+    "valid_dir": {
+        "_type": "python_object (type = PosixPath)",
+        "_value": "gANjcGF0aGxpYgpQb3NpeFBhdGgKcQAoWAEAAAAvcQFYBAAAAGhvbWVxAlgIAAAAbGl1Y2hhbmdxA1gEAAAAREFUQXEEWAwAAABybGJlbmNoX2RhdGFxBXRxBlJxBy4="
+    },
+    "valset": null,
+    "variations": {
+        "_type": "tuple",
+        "_value": [
+            0
+        ]
+    },
+    "workers": 8,
+    "xp": {
+        "_type": "python_object (type = PosixPath)",
+        "_value": "gANjcGF0aGxpYgpQb3NpeFBhdGgKcQAoWAEAAAAvcQFYBAAAAGhvbWVxAlgIAAAAbGl1Y2hhbmdxA1gIAAAAcHJvamVjdHNxBFgIAAAAVkxNYmVuY2hxBWgFWAMAAAB2bG1xBlgHAAAAc2NyaXB0c3EHWAIAAAB4cHEIdHEJUnEKLg=="
+    }
+}

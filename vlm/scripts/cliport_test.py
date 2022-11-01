@@ -46,6 +46,9 @@ class Recorder(object):
         video.release()
         self._snaps = []
 
+    def del_snap(self):
+        self._snaps = []
+
 class CircleCameraMotion(CameraMotion):
 
     def __init__(self, cam: VisionSensor, origin: Dummy, speed: float):
@@ -278,6 +281,8 @@ if __name__=="__main__":
 
     if args.recorder:
         recorder = Recorder()
+    else:
+        recorder = None
     # if args.recorder:
     #     cam_placeholder = Dummy('cam_cinematic_placeholder')
     #     cam = VisionSensor.create([640, 360])
@@ -422,6 +427,8 @@ if __name__=="__main__":
             if recorder is not None and success_times > history_success:
                 recorder.save(f"./records/{task.get_name()}/{num+1}.avi")
                 history_success = success_times
+            elif recorder is not None:
+                recorder.del_snap()
 
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
