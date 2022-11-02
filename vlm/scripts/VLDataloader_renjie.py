@@ -16,6 +16,9 @@ pickle.DEFAULT_PROTOCOL=pickle.HIGHEST_PROTOCOL
 import random
 from vlm.scripts.utils import keypoint_discovery,mask_tokens,max_sperate_index
 from pytorch_transformers import  BertTokenizer
+# add hiverformer
+from torch.nn import functional as F
+from hiverformer.utils import obs_to_attn
 
 class VLM_dataset(Dataset):
     def __init__(self, root, setd, img_size=(256, 256), 
@@ -229,7 +232,7 @@ class VLM_dataset(Dataset):
 
             key_frames = keypoint_discovery(demo_temple._observations)
             action=[]
-            traj=[]
+            # traj=[]
             select_frames=[]
 
             # 获取抽样轨迹  
@@ -246,7 +249,7 @@ class VLM_dataset(Dataset):
             sperate_index = max_sperate_index(select_frames)
             range1 = select_frames[sperate_index-1]
             range2 = select_frames[sperate_index]
-
+                        
             random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
             random_index2 = random.randint(random_index1+1,range2-1)
             select_frames.insert(sperate_index,random_index2)
@@ -256,7 +259,7 @@ class VLM_dataset(Dataset):
 
             demos = get_stored_demos(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
-
+            
             rgb = []
             rgbs = []
             pcd = []
@@ -264,36 +267,55 @@ class VLM_dataset(Dataset):
             for frame in select_frames:
                 obs=demos[0]._observations[frame]
                 action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                for i in range(0,3):
-                    rgb.append(obs.front_rgb)
-                    rgb.append(obs.overhead_rgb)
-                    rgb.append(obs.wrist)
-                    pcd.append(obs.front_point_cloud)
-                    pcd.append(obs.overhead_point_cloud)
-                    pcd.append(obs.wrist_point_cloud)
+                # for i in range(0,3):
+                rgb.append(obs.front_rgb)
+                rgb.append(obs.overhead_rgb)
+                rgb.append(obs.wrist_rgb)
+                pcd.append(obs.front_point_cloud)
+                pcd.append(obs.overhead_point_cloud)
+                pcd.append(obs.wrist_point_cloud)
 
-                rgbs.append(rgb)
-                pcds.append(pcd)
+                rgbs.append(rgb.copy())
+                pcds.append(pcd.copy())
+                rgb.clear()
+                pcd.clear()
                 # rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
                 # for rgb in rgbs:
                 #     if rgb is not None:
                 #         traj.append(rgb)
 
             action = action[:-1]
-            pad_len = max_traj_len - len(traj)
+            pad_len = max_traj_len - len(rgbs)
             padding_mask = list([True] * valid_action_length + [False] * pad_len)
-            while len(traj) < max_traj_len: # padding to max_traj_len
+            while len(rgbs) < max_traj_len: # padding to max_traj_len
                 action.append(action[-1])
-                traj.append(traj[-1])
+                # traj.append(traj[-1])
                 rgbs.append(rgbs[-1])
                 pcds.append(pcds[-1])
-                
-                
+            action.append(action[-1])
             
+            # 给所选的关键帧 添加 attent
+            cameras = ['front','overhead','wrist']
+            attn_indices = [{cam: obs_to_attn(demos[0]._observations[f], cam) for cam in cameras} for f in select_frames]
+
+            attns = torch.Tensor([])
+            for i in range(0, len(select_frames)):
+                attn_cams = torch.Tensor([])
+                for cam in cameras:
+                    u, v = attn_indices[i][cam]
+                    attn = torch.zeros((1, 1, 128, 128))
+                    if not (u < 0 or u > 127 or v < 0 or v > 127):
+                        attn[0, 0, v, u] = 1
+                    attn_cams = torch.cat([attn_cams, attn])
+                attns = torch.cat([attns, attn_cams.unsqueeze(0)])  # num 3(cameras) 1 360 360
+            pad_vec = [0] * (2 * attns.dim())
+            pad_vec[-1] = pad_len
+            attns = F.pad(attns, pad_vec)            
+
             if fake == True:
                 output_dict = {
                 # "img":img,
-                "traj": np.array(traj)}
+                "traj": np.array(rgbs)}
                 return output_dict
                   
             random_history_index=random.randint(1,valid_action_length-1)
@@ -309,10 +331,10 @@ class VLM_dataset(Dataset):
             instr_tokens=self.tokenizer.convert_tokens_to_ids(instr_tokens)
             
             # mask tokens
-            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer,self.args)
+            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer)
             output_dict = {
                 # "img":img,
-                "traj": np.array(traj),
+                "traj": np.array(rgbs),
                 # "target": target,
                 "language": np.array(instr_tokens), 
                 "mask_language":np.array(mask_instr_tokens),
@@ -323,8 +345,10 @@ class VLM_dataset(Dataset):
                 "action_label":action_label,
                 # "state":state,
                 "rgbs": np.array(rgbs),
+                "attns": attns,
                 "pcds": np.array(pcds),
                 "padding_mask": np.array(padding_mask),
+                "task": str(task_name)
             }
             return output_dict
     

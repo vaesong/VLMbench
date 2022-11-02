@@ -680,30 +680,9 @@ def load_instructions(instructions: Optional[Path], tasks: Optional[Sequence[str
 
 class LossAndMetrics:
     def __init__(
-        self,task
+        self,args
     ):
-        if task == 'drop': #
-            self.tasks = ['drop_pen_color', 'drop_pen_relative', 'drop_pen_size']
-        elif task == 'pick': #
-            self.tasks = ['pick_cube_shape', 'pick_cube_relative', 'pick_cube_color', 'pick_cube_size']
-        elif task == 'stack': 
-            self.tasks = ['stack_cubes_color', 'stack_cubes_relative', 'stack_cubes_shape', 'stack_cubes_size']
-        elif task == 'shape_sorter':
-            self.tasks = ['place_into_shape_sorter_color', 'place_into_shape_sorter_relative', 'place_into_shape_sorter_shape']
-        elif task == 'wipe':
-            self.tasks = ['wipe_table_shape', 'wipe_table_color', 'wipe_table_relative', 'wipe_table_size', 'wipe_table_direction']
-        elif task == 'pour':
-            self.tasks = ['pour_demo_color', 'pour_demo_relative', 'pour_demo_size']
-        elif task == 'drawer':
-            self.tasks = ['open_drawer']
-        elif task == 'door':
-            self.tasks = ['open_door']
-        elif task == 'door_complex':
-            self.tasks = ['open_door_complex']
-        else:
-            print("--task error!!")
-            exit(0)
-            
+        self.tasks = args.train_tasks
         # task_file = Path(__file__).parent / "tasks.csv"
         # with open(task_file) as fid:
         #     self.tasks = [t.strip() for t in fid.readlines()]
@@ -711,19 +690,19 @@ class LossAndMetrics:
     def compute_loss(
         self, pred: Dict[str, torch.Tensor], sample: Sample
     ) -> Dict[str, torch.Tensor]:
-        device = pred["position"].device
+        device = pred["position"].float().device
         padding_mask = sample["padding_mask"].to(device)
-        outputs = sample["action"].to(device)[padding_mask]
+        outputs = sample["action"].to(device)[padding_mask].float()
 
         losses = {}
         losses["position"] = F.mse_loss(pred["position"], outputs[:, :3]) * 3
 
-        losses.update(compute_rotation_loss(pred["rotation"], outputs[:, 3:7]))
-        losses["gripper"] = F.mse_loss(pred["gripper"], outputs[:, 7:8])
-        if pred["task"] is not None:
+        losses.update(compute_rotation_loss(pred["rotation"].float(), outputs[:, 3:7]))
+        losses["gripper"] = F.mse_loss(pred["gripper"].float(), outputs[:, 7:8])
+        if pred["task"] is not None:    # torch.Size([8, 106])
             task = torch.Tensor([self.tasks.index(t) for t in sample["task"]])
             task = task.to(device).long()
-            losses["task"] = F.cross_entropy(pred["task"], task)
+            losses["task"] = F.cross_entropy(pred["task"].float(), task)
         return losses
 
     def compute_metrics(

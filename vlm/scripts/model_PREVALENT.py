@@ -40,9 +40,9 @@ class VLNBERT(nn.Module):
         #     )
         self.fc = nn.Sequential(
             nn.Linear(768, 128), 
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(128,32),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(32,8),
             )
         # self.mlm_fc = nn.Sequential(
@@ -62,7 +62,7 @@ class VLNBERT(nn.Module):
         self.state_LayerNorm = BertLayerNorm(hidden_size, eps=layer_norm_eps)
         
         self.vision_encoder = VisionEncoder(self.vln_bert.config.img_feature_dim, self.vln_bert.config)
-                # resnet 152
+        # resnet 152
         resnet152 = models.resnet152(pretrained=True)
         resnet152.fc = nn.Linear(2048,2048)
         for parm in resnet152.parameters():
@@ -86,12 +86,15 @@ class VLNBERT(nn.Module):
             # state_with_action = self.action_LayerNorm(state_with_action)
             # state_feats = torch.cat((state_with_action.unsqueeze(1), sentence[:,1:,:]), dim=1)
             state_feats = sentence
-            candidate_feat=torch.zeros([args.batch_size,args.maxAction,2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
+            if args.test_only:
+                candidate_feat=torch.zeros([1,img.shape[1],2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
+            else:
+                candidate_feat=torch.zeros([args.batch_size,img.shape[1],2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
             for i in range(args.batch_size):
                 rgb = img[i].permute(0,3,1,2).float() 
                 rgb = self.resnet152(rgb)
                 action_feat = action_feats[i].repeat(1,args.action_repeat)
-                img_feat = torch.cat([rgb,action_feat],dim =1)  # torch.Size([12, 360, 360, 3])， torch.Size([12, 128]) 
+                img_feat = torch.cat([rgb,action_feat],dim =1)  
                 candidate_feat[i] = img_feat   
             candidate_feat = candidate_feat
             img_feats = self.vision_encoder(candidate_feat.float())
@@ -113,6 +116,10 @@ class VLNBERT(nn.Module):
             state_proj = self.state_proj(state_output)
             state_proj = self.state_LayerNorm(state_proj)
             action = self.fc(state_proj)
+            action = 1.8 * torch.tanh(action)
+            # action[:,0] = torch.clamp(action[:,0],-0.275,0.775)
+            # action[:,1] = torch.clamp(action[:,1],-0.655,0.655)
+            # action[:,2] = torch.clamp(action[:,2],0.712,1.752)
              
             return state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action
             # return state_proj, logit

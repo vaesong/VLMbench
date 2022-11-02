@@ -646,26 +646,26 @@ class Hiveformer(nn.Module):
         padding_mask2 = torch.ones_like(padding_mask)  # HACK
 
         # processing encoding feature
-        B, T, N = rgb_obs.shape[:3]
+        B, T, N = rgb_obs.shape[:3]     # B, T(关键帧个数), N=3, ch, h, w
         device = rgb_obs.device
 
         rgb_obs_ = einops.rearrange(rgb_obs, "b t n ch h w -> (b t n) ch h w")
 
         rgb_obs_ = self.rgb_preprocess(rgb_obs_)
 
-        x = self.to_feat(rgb_obs_)
+        x = self.to_feat(rgb_obs_)  # torch.Size([288, 16, 180, 180])
 
         # encoding features
         enc_feat = []
         for l in self.feature_encoder:
             x, res = l(x)
 
-            res = einops.rearrange(res, "(b t n) c h w -> b t n c h w", n=N, t=T)
+            res = einops.rearrange(res, "(b t n) c h w -> b t n c h w", n=N, t=T)   # torch.Size([8, 12, 3, 16, 90, 90])
             res = res[padding_mask]
             res = einops.rearrange(res, "bpad n c h w -> (bpad n) c h w")
             enc_feat.append(res)
 
-        x = einops.rearrange(x, "(b t n) c h w -> b t n c h w", n=N, t=T)
+        x = einops.rearrange(x, "(b t n) c h w -> b t n c h w", n=N, t=T)   # torch.Size([8, 12, 3, 16, 12, 12])
 
         # random masking
         mask_obs = generate_mask_obs(self._mask_obs_prob, (B, T)).to(device)
@@ -677,7 +677,7 @@ class Hiveformer(nn.Module):
 
         # Add extra channels with Point Clouds
         pcd = einops.rearrange(pc_obs, "b t n c h w -> (b t n) c h w")
-        pcd = F.avg_pool2d(pcd, 16)
+        pcd = F.avg_pool2d(pcd, 16) # 这里把 180，180 转为 11，11
         pcd = einops.rearrange(pcd, "(b t n) c h w -> b t n c h w", b=B, t=T, n=N)
         x = torch.cat([x, pcd], 3)
 

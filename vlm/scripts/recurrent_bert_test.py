@@ -247,8 +247,6 @@ class RecurrentBertAgent():
             action[:2]=gt_pose[:2]
         if use_gt_z:
             action[2]=gt_pose[2]
-        if action[2] <0.75 or action[2] >1.41 :
-            action[2] = random.uniform(0.76,1.5)
         if use_gt_theta and use_gt_roll_pitch:
             rotation = R.from_quat(gt_pose[3:]).as_euler('zyx')
             action[3:7] = R.from_euler("zyx",rotation).as_quat()
@@ -256,7 +254,6 @@ class RecurrentBertAgent():
         else:
             rotation=R.from_quat(action[3:7]).as_euler('zyx')
             action[3:7] = R.from_euler("zyx",rotation).as_quat()
-        
         return state_proj,action
       
 def load_test_config(data_folder: Path, task_name):
@@ -284,7 +281,7 @@ def add_argments():
     parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/snap/drawer_overhead/state_dict/LAST_iter300", help='path of the trained model')
     parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
-    parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
+    parser.add_argument('--maxAction', type=int, default=5, help='Max Action sequence')
     parser.add_argument('--img_size',nargs='+', type=int, default=[360,360])
     parser.add_argument('--gpu', type=int, default=7)
     parser.add_argument('--language_padding', type=int, default=80)
@@ -457,19 +454,23 @@ if __name__=="__main__":
             actions=[]
             state= None
             use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch = False ,False,False,False
-            for i in range(args.maxAction):
+            for i in range(7):
                 history_img.append(obs.front_rgb)
                 history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
                 if i == 0:
                     use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch=True,True,True,True
                 else:
-                    use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch=False,False,False,False
+                    use_gt_xy,use_gt_z=False,False
+                    use_gt_theta,use_gt_roll_pitch = True,True
                 if i < len(step_list):
                     step = step_list[i]
                 state,action = agent.act(history_img,high_descriptions,history_action,state,step,use_gt_xy,use_gt_z,use_gt_theta, use_gt_roll_pitch)
                 hidden_states.append(state.cpu().numpy())
                 actions.append(action)
-                obs, reward, terminate = task.step(action,collision_checking=None,recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
+                try:
+                    obs, reward, terminate = task.step(action,collision_checking=None,recorder = recorder, use_auto_move=True, need_grasp_obj = target_grasp_obj_name)
+                except:
+                    break
                 rewards.append(reward)
                 if reward == 0.5:
                     grasped = True
@@ -478,7 +479,7 @@ if __name__=="__main__":
                     success_times+=1
                     successed = True
                     break
-            recorder.save(f"./records/{task.get_name()}/{num+1}.avi")
+            recorder.save(f"./records_vlm/{task.get_name()}/{num+1}.avi")
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
             file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")

@@ -139,9 +139,11 @@ class VLM_dataset(Dataset):
                 output_dict["random_traj"] = output_dict["traj"]  
                 output_dict["ismatch"] = ismatch
         elif prob_itm <= 1:
+                fake_output = self.get_episode(fake_episode,fake=True)
                 ismatch = 0
-                output_dict["random_traj"] = self.get_episode(fake_episode,fake=True)["traj"]
-                output_dict["ismatch"] = ismatch           
+                output_dict["random_traj"] = fake_output["traj"]
+                output_dict["ismatch"] = ismatch         
+                output_dict["action"]  = fake_output["action"]
         return output_dict
 
     def get_episode(self,episode,fake):
@@ -155,29 +157,29 @@ class VLM_dataset(Dataset):
         
         sequence_length = len(demo_temple._observations)
         obs_select_inds = np.arange(sequence_length)
-        if fake == False:
-            if self.sample_numbers:
-                if self.random_sample:
-                    obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
+        
+        if self.sample_numbers:
+            if self.random_sample:
+                obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
+            else:
+                obs_select_inds = obs_select_inds[0:self.sample_numbers]
+        split_by_waypoint = True
+        # 根据watpoints切分
+        # obs_select_inds：选择出每个waypoint的开始index
+        if split_by_waypoint:
+            lang = demo_temple.high_level_instructions[0]
+            obs_select_inds = [0]
+            previous_waypoint="waypoint0"
+            # all_way_points只存了分割点的waypoint
+            self.all_waypoints = [previous_waypoint]
+            for i, obs in enumerate(demo_temple._observations):
+                if obs.current_waypoint_name == previous_waypoint:
+                    continue
                 else:
-                    obs_select_inds = obs_select_inds[0:self.sample_numbers]
-            split_by_waypoint = True
-            # 根据watpoints切分
-            # obs_select_inds：选择出每个waypoint的开始index
-            if split_by_waypoint:
-                lang = demo_temple.high_level_instructions[0]
-                obs_select_inds = [0]
-                previous_waypoint="waypoint0"
-                # all_way_points只存了分割点的waypoint
-                self.all_waypoints = [previous_waypoint]
-                for i, obs in enumerate(demo_temple._observations):
-                    if obs.current_waypoint_name == previous_waypoint:
-                        continue
-                    else:
-                        previous_waypoint = obs.current_waypoint_name
-                        self.all_waypoints.append(previous_waypoint)
-                        obs_select_inds.append(i)
-                        lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
+                    previous_waypoint = obs.current_waypoint_name
+                    self.all_waypoints.append(previous_waypoint)
+                    obs_select_inds.append(i)
+                    lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
         if self.preprocess:
             preprocess_data_folder = self.dataset_path/episode/'preprocess_data'
 
@@ -233,7 +235,7 @@ class VLM_dataset(Dataset):
             select_frames=[]
 
             # 删
-            # key_frames = obs_select_inds
+            key_frames = obs_select_inds
 
             # 获取抽样轨迹  
             max_traj_len= self.args.maxAction
@@ -273,6 +275,7 @@ class VLM_dataset(Dataset):
             if fake == True:
                 output_dict = {
                 # "img":img,
+                "action":np.array(action),
                 "traj": np.array(traj)}
                 return output_dict
                   

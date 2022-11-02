@@ -46,7 +46,7 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
                      fail_demos = False,
                      selected_frame=None) -> List[Demo]:
 
-    task_root = join(dataset_root, task_name)
+    task_root = join(dataset_root, task_name)#'/home/liuchang/DATA/rlbench_data/train/drop_pen_color
     if not exists(task_root):
         raise RuntimeError("Can't find the demos for %s at: %s" % (
             task_name, task_root))
@@ -54,12 +54,12 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
     # Sample an amount of examples for the variation of this task
     examples_path = join(
         task_root, VARIATIONS_FOLDER % variation_number,
-        EPISODES_FOLDER)
+        EPISODES_FOLDER)#'/home/liuchang/DATA/rlbench_data/train/drop_pen_color/variation0/episodes'
     if fail_demos:
         examples_path = join(
         task_root, VARIATIONS_FOLDER % variation_number,
         'fail_cases')
-    examples = listdir(examples_path)
+    examples = listdir(examples_path)#列出所有的episode
     if amount == -1:
         amount = len(examples)
     if amount > len(examples):
@@ -109,7 +109,7 @@ def get_stored_demos(amount: int, image_paths: bool, dataset_root: str,
                 listdir(front_depth_f))):
             raise RuntimeError('Broken dataset assumption')
 
-        if selected_frame is None:
+        if selected_frame is None:#waypoint[0,63,79,97]
             selected_frame = range(num_steps)
         for i in selected_frame:
             si = IMAGE_FORMAT % i

@@ -10,13 +10,15 @@ class Param:
         self.parser.add_argument('--iters', type=int, default=500, help='training iterations')
         self.parser.add_argument('--name', type=str, default='default', help='experiment id')
         self.parser.add_argument('--vlnbert', type=str, default='prevalent', help='oscar or prevalent')
+        self.parser.add_argument('--test_only', action='store_true')
+
 
         # Data preparation
-        self.parser.add_argument('--batch_size', type=int, default=1, metavar='N',
+        self.parser.add_argument('--batch_size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 8)')
         self.parser.add_argument('--workers', type=int, default=8) #default=32
         self.parser.add_argument('--maxInput', type=int, default=80, help="max input instruction")
-        self.parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
+        self.parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
         self.parser.add_argument('--ignoreid', type=int, default=-100)
         self.parser.add_argument("--loadOptim",action="store_const", default=False, const=True)
 
@@ -76,7 +78,7 @@ class Param:
                 help='number of nodes for distributed training')
         self.parser.add_argument('--rank', default=0, type=int,
                         help='node rank for distributed training')
-        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23459', type=str,
+        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23461', type=str,
                         help='url used to set up distributed training')
         self.parser.add_argument('--dist-backend', default='nccl', type=str,
                         help='distributed backend')

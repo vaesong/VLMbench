@@ -114,7 +114,7 @@ class VLM_dataset(Dataset):
         task_name = episode.parents[2]
         fail_cases = 'fail_cases' in str(episode)
 
-        low_dim_obs = self.dataset_path/episode/"low_dim_obs.pkl"
+        low_dim_obs = self.dataset_path/episode/"low_dim_obs.pkl"#打开的是一条轨迹的episode
         with open(low_dim_obs, 'rb') as f:
             demo_temple = pickle.load(f)
         

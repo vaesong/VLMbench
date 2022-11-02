@@ -123,9 +123,9 @@ def main(gpu, ngpus_per_node, args):
                     use_fail_cases = args.use_fail_cases, sample_numbers = args.sample_numbers, args=args)
         # 设置采样
         if args.distributed:
-                train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         else:
-                train_sampler = None
+            train_sampler = None
 
         train_loader = torch.utils.data.DataLoader(  
                 train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
@@ -186,7 +186,7 @@ def main(gpu, ngpus_per_node, args):
         if args.load is not None:
                 start_iter,vln_bert,optimizer = load(args.load,vln_bert,optimizer)
                 print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
-
+        #train
         vln_bert.train()
         timer = {"batch_time":AverageMeter('Time', ':6.3f')}
         for iter in range(1, args.iters+1):
@@ -197,6 +197,8 @@ def main(gpu, ngpus_per_node, args):
                 total_acc_mlm,total_acc_itm, total_action_loss= 0,0,0
                 avg_acc_mlm,avg_acc_itm,avg_action_loss = 0,0,0
                 step_mlm,step_itm,step_action = 0,0,0
+                acc_mlm,acc_itm,action_loss = 0,0,0
+                loss = 0
                 optimizer.zero_grad()
 
                 # 设置时间
@@ -231,54 +233,62 @@ def main(gpu, ngpus_per_node, args):
                         h_t, language_features = vln_bert(**language_inputs)
                         language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
 
-                        if task == "action":                       
-                                visual_temp_mask=(utils.length2mask(batch_data["random_history_index"].tolist(),args.maxAction) == 0).long().cuda(args.gpu)
-                        else :
-                                visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long().cuda(args.gpu)
-                        visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda(args.gpu)
+                        action_length = 1
+                        state_proj = None
+                        while action_length < min(batch_data["valid_length"].tolist()):
+                                if task == "action":                  
+                                        visual_temp_mask=(utils.length2mask([action_length]*args.batch_size,args.maxAction) == 0).long().cuda(args.gpu)
+                                else :
+                                        action_length = 12
+                                        visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long().cuda(args.gpu)
+                                visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda(args.gpu)
 
-                        action =  batch_data["action"].cuda(args.gpu)
-                        # vln_bert.module.vln_bert.config.directions = args.maxAction
-                        visual_inputs = {'mode':      'visual',
-                                'sentence':           language_features,
-                                'attention_mask':     visual_attention_mask,
-                                'lang_mask':          language_attention_mask,
-                                'vis_mask':           visual_temp_mask,
-                                'token_type_ids':     token_type_ids,
-                                # 'action_feats':       input_a_t,
-                                # 'pano_feats':         f_t,
-                                'img':                img,
-                                "action_feats":       action        
-                                }
-                        state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action= vln_bert(**visual_inputs)      
+                                if state_proj is not None:
+                                        language_features = torch.cat((state_proj.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+
+                                action =  batch_data["action"].cuda(args.gpu)
+                                # vln_bert.module.vln_bert.config.directions = args.maxAction
+                                visual_inputs = {'mode':      'visual',
+                                        'sentence':           language_features,
+                                        'attention_mask':     visual_attention_mask,
+                                        'lang_mask':          language_attention_mask,
+                                        'vis_mask':           visual_temp_mask,
+                                        'token_type_ids':     token_type_ids,
+                                        # 'action_feats':       input_a_t,
+                                        # 'pano_feats':         f_t,
+                                        'img':                img,
+                                        "action_feats":       action        
+                                        }
+                                state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action = vln_bert(**visual_inputs)      
                         
-                        if task == 'mlm': 
-                                prediction_scores = mlmhead(lang_output)                                
-                                mask_loss = criterion(prediction_scores.view(-1,config.vocab_size), batch_data["mlm_label"].view(-1).cuda(args.gpu))
-                                loss = mask_loss
-                                bool_label = batch_data["mlm_label"] > 0
-                                pred = prediction_scores[bool_label, :].argmax(1)
-                                valid_labels = batch_data["mlm_label"][bool_label].cuda(args.gpu)
-                                acc_mlm = (pred == valid_labels).type(torch.float).mean() * 100.
-                                total_acc_mlm += acc_mlm
-                                step_mlm = step_mlm + 1
-                                avg_acc_mlm = total_acc_mlm /step_mlm
-                        elif task == 'itm':
-                                cls_part = lang_output_pooler * visn_output_poller
-                                match_scores = is_match(cls_part)
-                                match_loss = criterion(match_scores,batch_data["ismatch"].cuda(args.gpu)) * 5
-                                loss = match_loss
-                                correct = match_scores.argmax(dim=-1).eq(batch_data["ismatch"].cuda(args.gpu)).sum().item()
-                                acc_itm = correct / batch_data["ismatch"].nelement() *100
-                                total_acc_itm += acc_itm
-                                step_itm = step_itm + 1
-                                avg_acc_itm = total_acc_itm /(step_itm)
-                        elif task == "action":
-                                action_loss = criterion2(action,batch_data["action_label"].cuda(args.gpu)) * 1000
-                                loss = action_loss
-                                total_action_loss += action_loss
-                                step_action +=1
-                                avg_action_loss = total_action_loss/step_action
+                                if task == 'mlm': 
+                                        prediction_scores = mlmhead(lang_output)                                
+                                        mask_loss = criterion(prediction_scores.view(-1,config.vocab_size), batch_data["mlm_label"].view(-1).cuda(args.gpu))
+                                        loss = mask_loss
+                                        bool_label = batch_data["mlm_label"] > 0
+                                        pred = prediction_scores[bool_label, :].argmax(1)
+                                        valid_labels = batch_data["mlm_label"][bool_label].cuda(args.gpu)
+                                        acc_mlm = (pred == valid_labels).type(torch.float).mean() * 100.
+                                        total_acc_mlm += acc_mlm
+                                        step_mlm = step_mlm + 1
+                                        avg_acc_mlm = total_acc_mlm /step_mlm
+                                elif task == 'itm':
+                                        cls_part = lang_output_pooler * visn_output_poller
+                                        match_scores = is_match(cls_part)
+                                        match_loss = criterion(match_scores,batch_data["ismatch"].cuda(args.gpu)) * 5
+                                        loss = match_loss
+                                        correct = match_scores.argmax(dim=-1).eq(batch_data["ismatch"].cuda(args.gpu)).sum().item()
+                                        acc_itm = correct / batch_data["ismatch"].nelement() *100
+                                        total_acc_itm += acc_itm
+                                        step_itm = step_itm + 1
+                                        avg_acc_itm = total_acc_itm /(step_itm)
+                                elif task == "action":
+                                        action_loss = criterion2(action,batch_data["action"][:,action_length,:].cuda(args.gpu)) * 1000
+                                        total_action_loss += action_loss
+                                        loss = total_action_loss
+                                        step_action +=1
+                                        action_length += 1
+                                        avg_action_loss = total_action_loss/step_action
                         
                         loss.backward()
                         if args.distributed:
@@ -319,7 +329,144 @@ def main(gpu, ngpus_per_node, args):
                 writer.add_scalar("avg_acc_itm", avg_acc_itm, iter)
                 writer.add_scalar("avg_action_loss", avg_action_loss, iter)
                 # writer.flush()
+            #valid
+            valid_dataset = VLM_dataset(args.data_dir, 'valid', img_size=args.img_size, unused_camera_list = args.unused_camera_list, preprocess = args.preprocess, 
+                    use_fail_cases = args.use_fail_cases, sample_numbers = args.sample_numbers, args=args)
+            valid_loader = torch.utils.data.DataLoader(  
+                valid_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+                num_workers=args.workers, pin_memory=True, sampler=train_sampler, 
+                drop_last=True,persistent_workers=True)
+            
+            total_acc_mlm,total_acc_itm, total_action_loss= 0,0,0
+            avg_acc_mlm,avg_acc_itm,avg_action_loss = 0,0,0
+            step_mlm,step_itm,step_action = 0,0,0
+            acc_mlm,acc_itm,action_loss = 0,0,0
+            loss = 0
+            for batch_step, batch_data in enumerate(valid_loader):
+                if len(batch_data)==0:
+                    continue                
+                prob_itm = np.random.random()
+                if prob_itm <= 0.25:
+                    task = "mlm"
+                    language = batch_data["mask_language"]
+                    img = batch_data["traj"].cuda(args.gpu)
+                elif prob_itm <= 0.5:
+                    task = "itm"
+                    language = batch_data["language"]
+                    img = batch_data["random_traj"].cuda(args.gpu)
+                else:
+                    task = "action"
+                    language = batch_data["language"]
+                    img = batch_data["traj"].cuda(args.gpu)
+                language_attention_mask = (language != padding_idx).long().cuda(args.gpu)
+                token_type_ids = torch.zeros_like(language_attention_mask).long().cuda(args.gpu)                                               
+                # initial
+                language_inputs = {'mode':'language',
+                'sentence':       Variable(language, requires_grad=False).long().cuda(args.gpu),
+                'attention_mask': language_attention_mask,
+                'lang_mask':         language_attention_mask,  
+                'token_type_ids': token_type_ids}
+                # vln_bert = model_OSCAR.VLNBERT().cuda(args.gpu)
+
+                h_t, language_features = vln_bert(**language_inputs)
+                language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+
+                action_length = 1
+                state_proj = None
+                while action_length < min(batch_data["valid_length"].tolist()):
+                    if task == "action":                  
+                        visual_temp_mask=(utils.length2mask([action_length]*args.batch_size,args.maxAction) == 0).long().cuda(args.gpu)
+                    else:
+                        action_length = 12
+                        visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long().cuda(args.gpu)
+                    visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda(args.gpu)
+
+                    if state_proj is not None:
+                        language_features = torch.cat((state_proj.unsqueeze(1), language_features[:,1:,:]), dim=1) 
+
+                    action =  batch_data["action"].cuda(args.gpu)
+                    # vln_bert.module.vln_bert.config.directions = args.maxAction
+                    visual_inputs = {'mode':      'visual',
+                            'sentence':           language_features,
+                            'attention_mask':     visual_attention_mask,
+                            'lang_mask':          language_attention_mask,
+                            'vis_mask':           visual_temp_mask,
+                            'token_type_ids':     token_type_ids,
+                            # 'action_feats':       input_a_t,
+                            # 'pano_feats':         f_t,
+                            'img':                img,
+                            "action_feats":       action        
+                            }
+                    with torch.no_grad():
+                        state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action = vln_bert(**visual_inputs)      
                 
+                        if task == 'mlm': 
+                            prediction_scores = mlmhead(lang_output)                                
+                            mask_loss = criterion(prediction_scores.view(-1,config.vocab_size), batch_data["mlm_label"].view(-1).cuda(args.gpu))
+                            loss = mask_loss
+                            bool_label = batch_data["mlm_label"] > 0
+                            pred = prediction_scores[bool_label, :].argmax(1)
+                            valid_labels = batch_data["mlm_label"][bool_label].cuda(args.gpu)
+                            acc_mlm = (pred == valid_labels).type(torch.float).mean() * 100.
+                            total_acc_mlm += acc_mlm
+                            step_mlm = step_mlm + 1
+                            avg_acc_mlm = total_acc_mlm /step_mlm
+                        elif task == 'itm':
+                            cls_part = lang_output_pooler * visn_output_poller
+                            match_scores = is_match(cls_part)
+                            match_loss = criterion(match_scores,batch_data["ismatch"].cuda(args.gpu)) * 5
+                            loss = match_loss
+                            correct = match_scores.argmax(dim=-1).eq(batch_data["ismatch"].cuda(args.gpu)).sum().item()
+                            acc_itm = correct / batch_data["ismatch"].nelement() *100
+                            total_acc_itm += acc_itm
+                            step_itm = step_itm + 1
+                            avg_acc_itm = total_acc_itm /(step_itm)
+                        elif task == "action":
+                            action_loss = criterion2(action,batch_data["action"][:,action_length,:].cuda(args.gpu)) * 1000
+                            total_action_loss += action_loss
+                            loss = total_action_loss
+                            step_action +=1
+                            action_length += 1
+                            avg_action_loss = total_action_loss/step_action
+                # loss.backward()
+                # if args.distributed:
+                #         torch.nn.utils.clip_grad_norm(vln_bert.module.parameters(), 40.)
+                # else:
+                #         torch.nn.utils.clip_grad_norm(vln_bert.parameters(), 40.)
+                # optimizer.step()
+
+                # 计算时间
+                batch_time.update(time.time() - end)
+                end = time.time()
+                time_per_epoch = batch_time.avg * len(valid_loader)
+                epochs_left = args.iters - iter - 1
+                batches_left = len(train_loader) - batch_step - 1
+
+                time_elapsed = sec_to_str(batch_time.sum)
+                time_left = sec_to_str(batches_left * batch_time.avg + epochs_left * time_per_epoch)
+                time_estimate = sec_to_str(args.iters * time_per_epoch)
+                # 打印一些东西
+                tmp_str = 'Epoch: [{}/{}] Batch: [{}/{}]  ' \
+                        'Elapsed: {}  ' \
+                        'ETA: {} / {}  '\
+                        'acc_mlm: {}  ' \
+                        'acc_itm: {} ' \
+                        'action_loss:  {}'.format(iter + 1, args.iters, batch_step, len(train_loader), 
+                time_elapsed, time_left, time_estimate,acc_mlm, acc_itm, action_loss)
+
+                print(tmp_str)
+                
+        # print("-------------------------------------------")
+        # print("iter: "+str(iter)+" done!")        
+        if iter % args.log_every ==0:
+                if args.distributed:
+                        save(iter, os.path.join("snap", args.name, "state_dict", "LAST_iter%d" % (iter)),vln_bert.module,optimizer)
+                else:
+                        save(iter, os.path.join("snap", args.name, "state_dict", "LAST_iter%d" % (iter)),vln_bert,optimizer)
+        writer.add_scalar("avg_acc_mlm", avg_acc_mlm, iter)
+        writer.add_scalar("avg_acc_itm", avg_acc_itm, iter)
+        writer.add_scalar("avg_action_loss", avg_action_loss, iter)
+            
 if __name__=="__main__":
 
         if args.dist_url == "env://" and args.world_size == -1:

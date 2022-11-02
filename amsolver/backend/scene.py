@@ -451,9 +451,9 @@ class Scene(object):
 
     def check_target_in_workspace(self, target_pos: np.ndarray) -> bool:
         x, y, z = target_pos
-        return (self._workspace_maxx > x > self._workspace_minx and
-                self._workspace_maxy > y > self._workspace_miny and
-                self._workspace_maxz > z > self._workspace_minz)
+        return (self._workspace_maxx > x > self._workspace_minx and # 0.775 -0.275
+                self._workspace_maxy > y > self._workspace_miny and # 0.655 -0.655
+                self._workspace_maxz > z > self._workspace_minz) # 1.752 0.712
 
     def _demo_record_step(self, demo_list, record, func):
         if record:
