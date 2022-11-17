@@ -121,7 +121,8 @@ class CliportAgent(object):
                     attention_id = waypoint_info["target_obj"]
                     related_rotation = False
                 else:
-                    related_rotation = args.relative
+                    # related_rotation = args.relative
+                    related_rotation = False
                 if focus_waypoint_info["gripper_control"] is not None:
                     gripper_control = focus_waypoint_info["gripper_control"][1]
                 gt_pose = focus_waypoint_info['pose'][0]
@@ -198,7 +199,7 @@ def add_argments():
     parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
-    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
@@ -313,7 +314,8 @@ if __name__=="__main__":
     if args.ignore_collision:
         output_file_name += "_ignore"
     output_file_name += ".txt"
-    file = open(output_file_name, "w")
+
+    # file = open(output_file_name, "w")
     for i, task_to_train in enumerate(train_tasks):
         if args.wandb_entity is not None:
             run_name = f'{args.model_name}_{task_files[i]}_{args.setd}_{args.goal_conditioned}'
@@ -432,10 +434,10 @@ if __name__=="__main__":
 
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
-            file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")
+            # file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")
             if args.wandb_entity is not None:
                 wandb.log({"success":success_times, "grasp_success":grasp_success_times}, step=all_time)
         if args.wandb_entity is not None:
             wandb.finish()
-    file.close()
+    # file.close()
     env.shutdown()

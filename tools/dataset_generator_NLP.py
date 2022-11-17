@@ -31,13 +31,11 @@ If you want to generate unseen data, please set the colors and objects to the un
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    '/home/liuchang/DATA/rlbench_data/valid',
+                    '/home/liuchang/DATA/rlbench_data/train',
                     'Where to save the demos.')
 flags.DEFINE_list('tasks',[ 'stack_cubes_color', 'stack_cubes_size',
                             'stack_cubes_relative', 'stack_cubes_shape',
-                            'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-                            'open_drawer',
-                            'open_door_complex'] ,
+                           ] ,
                   'The tasks to collect. If empty, all tasks are collected.')     
                 #   [
                 #             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
@@ -57,12 +55,14 @@ flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'but is faster.')
 flags.DEFINE_integer('processes', 16,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 5,
+flags.DEFINE_integer('episodes_per_task', 80,
                      'The number of episodes to collect per task.')
 flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')
 flags.DEFINE_bool('save_configs', True,
                      'whether also save the config for replay.')
+flags.DEFINE_integer('seed', 1,
+                     'dataset collection seed')
 
 
 def check_and_make(dir):
@@ -327,7 +327,7 @@ def run(i, lock, task_index, variation_count, results, file_lock, tasks):
                     abort_variation = True
                     break
                 if success:
-                    episode_path = os.path.join(episodes_path, EPISODE_FOLDER % (ex_idx))
+                    episode_path = os.path.join(episodes_path, EPISODE_FOLDER % (20+ex_idx))
                     # with file_lock:
                     save_demo(demo, episode_path)
                     if FLAGS.save_configs:

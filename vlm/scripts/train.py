@@ -18,14 +18,10 @@ from filelock import FileLock
 import tap
 from hiverformer.process_instructions import get_language_feat
 from hiverformer.network import Hiveformer
+from hiverformer.dataset import My_Dataset
 from hiverformer.utils import (
     LossAndMetrics,
-    load_instructions,
-    RLBenchEnv,
     count_parameters,
-    load_episodes,
-    get_max_episode_length,
-    Actioner,
 )
 from vlm.scripts.VLDataloader_renjie import VLM_dataset
 # from dataset import RLBenchDataset, Sample
@@ -38,7 +34,7 @@ class Arguments(tap.Tap):
     accumulate_grad_batches: int = 1
     cameras: list = ['left_shoulder','right_shoulder','wrist']
     checkpoint: Optional[Path] = None
-    checkpoint_period: int = 100
+    checkpoint_period: int = 200
     
     xp: Path = "/home/liuchang/projects/VLMbench/VLMbench/xp"
     valset: Optional[Tuple[Path, ...]] = None
@@ -57,16 +53,16 @@ class Arguments(tap.Tap):
     variations: Tuple[int, ...] = (0,)
 
     # Train
-    batch_size: int = 24
+    batch_size: int = 16 # 25
     lr: float = 0.001
-    val_freq: int = 100     # 200
+    val_freq: int = 200     # 200
     val_batch_size: int = 16
     jitter: bool = False
     
     # 自己加的
-    train_dir: Path = None
-    valid_dir: Path = None
-    epochs: int = 10000
+    train_dir: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/packaged"
+    valid_dir: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/valid"
+    epochs: int = 100000
     relative: bool = False
     renew_obs: bool = False
     add_low_lang: bool = True
@@ -120,51 +116,32 @@ def training(
     args: Arguments,
     writer: SummaryWriter,
 ):
-    # iter_loader = iter(train_loader)
+    iter_loader = iter(train_loader)
     device = next(model.parameters()).device
 
-    timer = {"batch_time":AverageMeter('Time', ':6.3f')}
     print('---------------------------------------------start------------------------------------------------------')
-    for epoch in range(0, args.epochs+1):
-        # 在分布式模式下，需要在每个 epoch 开始时调用set_epoch()方法，然后再创建 DataLoader 迭代器，以使shuffle 操作能够在多个 epoch 中正常工作。 
-        # 否则，dataloader迭代器产生的数据将始终使用相同的顺序，使得每个epoch在每个GPU上分割的数据集都是一样的
-        if args.distributed:
-                train_sampler.set_epoch(epoch)
+    with trange(args.epochs, ncols=85) as tbar:
+        for step_id in tbar:
+            try:
+                sample = next(iter_loader)
+            except StopIteration:
+                iter_loader = iter(train_loader)
+                sample = next(iter_loader)
 
-        # 累计每一个 epoch 的所有 loss
-        total_loss = {"position":0, "rotation":0, "gripper":0, "task":0, "total":0}
-        total_metrics = {"position":0, "rotation":0, "gripper":0, "task":0, "total":0}
-
-        batch_time = timer["batch_time"]
-        end = time.time()
-        
-        for batch_step, batch_data in enumerate(train_loader):
-            sample = batch_data
-            
-            rgbs = sample["rgbs"].float().to(device) # B 4key_frame 3camera 4channel(rgb+attn) 128 128 except for the end index img
-            # rgbs = rgbs.permute(0,1,2,5,3,4)
-
-            # attens = sample["attns"].float().to(device)
-            # rgbs = torch.cat([rgbs, attens], 3)
-
-            pcds = sample["pcds"].float().to(device) # B 4key_frame 3camera 3channel 128 128 except for the end index pcd
-            # pcds = pcds.permute(0,1,2,5,3,4)
-
-            gripper = sample["gripper"].float().to(device) # B 4key_frame 8(action_ls[:-1]) except for the end index action
-            # outputs = sample["action"].to(device) # B 4key_frame 8(action_ls[1:]) except for the start index action 
+            rgbs = sample["rgbs"].to(device) # B 4key_frame 3camera 4channel(rgb+attn) 128 128 except for the end index img
+            pcds = sample["pcds"].to(device) # B 4key_frame 3camera 3channel 128 128 except for the end index pcd
+            gripper = sample["gripper"].to(device) # B 4key_frame 8(action_ls[:-1]) except for the end index action
+            outputs = sample["action"].to(device) # B 4key_frame 8(action_ls[1:]) except for the start index action 
             padding_mask = sample["padding_mask"].to(device)
 
             instr = sample["language"] # B 53 512
             lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
 
-            # frame_id = sample["frame_id"] # [0,1,2,3]
-            # tasks = sample["task"] 
-
-            if batch_step % args.accumulate_grad_batches == 0:
+            if step_id % args.accumulate_grad_batches == 0:
                 optimizer.zero_grad()
 
             pred = model(
-                rgbs,    
+                rgbs,   # 
                 pcds,
                 padding_mask,
                 lang_feat,
@@ -175,62 +152,34 @@ def training(
             train_losses["total"] = sum(list(train_losses.values()))  # type: ignore
 
             for n, l in train_losses.items():
-                total_loss[n] += l
+                writer.add_scalar(f"train-loss/{n}", l, step_id)
+
+            writer.add_scalar(f"lr/", args.lr, step_id)
 
             metrics = loss_and_metrics.compute_metrics(pred, sample)
             for n, l in metrics.items():
-                total_metrics[n] += l
+                writer.add_scalar(f"train-metrics/{n}", l, step_id)
 
             train_losses["total"].backward()  # type: ignore
 
-            if batch_step % args.accumulate_grad_batches == args.accumulate_grad_batches - 1:
+            if step_id % args.accumulate_grad_batches == args.accumulate_grad_batches - 1:
                 optimizer.step()
 
-            # tbar.set_postfix(l=float(train_losses["total"]))
-            # 计算时间
-            batch_time.update(time.time() - end)
-            end = time.time()
-            time_per_epoch = batch_time.avg * len(train_loader)
-            epochs_left = args.epochs - epoch - 1
-            batches_left = len(train_loader) - batch_step - 1
-
-            time_elapsed = sec_to_str(batch_time.sum)
-            time_left = sec_to_str(batches_left * batch_time.avg + epochs_left * time_per_epoch)
-            time_estimate = sec_to_str(args.epochs * time_per_epoch)
-            # 打印一些东西
-            tmp_str = 'Epoch: [{}/{}] Batch: [{}/{}]  ' \
-                    'rank: {}  ' \
-                    'Elapsed: {}  ' \
-                    'ETA: {} / {}  '\
-                    'total loss: {}  '.format(epoch+1, args.epochs, batch_step+1, len(train_loader), args.rank,
-            time_elapsed, time_left, time_estimate, train_losses["total"])
-
-            print(tmp_str)
-
-        # 在每个 epoch 结束之后判断是否验证
-        if (epoch + 1) % args.val_freq == 0:
-            if val_loaders is not None:
-                val_metrics = validation_step(
-                    batch_step,
-                    val_loaders,
-                    model,
-                    writer,
-                    loss_and_metrics,
-                    args,
-                )
-                model.train()
-            else:
-                val_metrics = {}
-            # 只有主进程才保存 checkpoint
-            if args.rank == 0 and checkpointer is not None:
+            if (step_id + 1) % args.val_freq == 0:
+                if val_loaders is not None:
+                    val_metrics = validation_step(
+                        step_id,
+                        val_loaders,
+                        model,
+                        writer,
+                        loss_and_metrics,
+                    )
+                    model.train()
+                else:
+                    val_metrics = {}
                 checkpointer(val_metrics)
-
-        # 写入Tensorboard
-        if writer is not None:
-            for key, value in total_loss.items():
-                writer.add_scalar(f"train-loss/{key}", value/len(train_loader), epoch+1)
-            for key, value in total_metrics.items():
-                writer.add_scalar(f"train-metrics/{key}", value/len(train_loader), epoch+1)
+            # 显示 loss 的
+            tbar.set_postfix(l=float(train_losses["total"]))
             
 def get_log_dir(args: Arguments) -> Path:
     log_dir = args.xp / args.name
@@ -289,22 +238,16 @@ def validation_step(
     device = next(model.parameters()).device 
     model.eval()
 
-    for val_id in range(1, val_iters):
-        for i, sample in enumerate(val_loaders):
+    for val_id, val_loader in enumerate(val_loaders):
+        for i, sample in enumerate(val_loader):
+            if i == val_iters:
+                break
 
-            rgbs = sample["rgbs"].float().to(device)
-            # rgbs = rgbs.permute(0,1,2,5,3,4)
-
-            # attens = sample["attns"].float().to(device)
-            # rgbs = torch.cat([rgbs, attens], 3)
-
-            pcds = sample["pcds"].float().to(device)
-            # pcds = pcds.permute(0,1,2,5,3,4)
-
-            gripper = sample["gripper"].float().to(device)
-            outputs = sample["action"].float().to(device)
+            rgbs = sample["rgbs"].to(device)
+            pcds = sample["pcds"].to(device)
+            gripper = sample["gripper"].to(device)
+            outputs = sample["action"].to(device)
             padding_mask = sample["padding_mask"].to(device)
-
             instr = sample["language"]
             lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 768
 
@@ -315,20 +258,23 @@ def validation_step(
                 lang_feat,
                 gripper,
             )
-            #/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/version17/model.epoch=20-value=0.pth
+
             losses: Dict[str, torch.Tensor] = loss_and_metrics.compute_loss(pred, sample)
             losses["total"] = torch.stack(list(losses.values())).sum()
 
             for n, l in losses.items():
                 key = f"val-loss/{n}"
+                writer.add_scalar(key, l, step_id + i)
                 if key not in values:
                     values[key] = torch.Tensor([]).to(device)
                 values[key] = torch.cat([values[key], l.unsqueeze(0)])
 
+            writer.add_scalar(f"lr/", args.lr, step_id + i)
+
             metrics = loss_and_metrics.compute_metrics(pred, sample)
             for n, l in metrics.items():
                 key = f"val-metrics/{n}"
-                # writer.add_scalar(key, l, step_id + i)
+                writer.add_scalar(key, l, step_id + i)
                 if key not in metrics:
                     values[key] = torch.Tensor([]).to(device)
                 values[key] = torch.cat([values[key], l.unsqueeze(0)])
@@ -340,100 +286,31 @@ def validation_step(
 
     return values
 
-def get_train_loader(args: Arguments) -> DataLoader:
-    dataset = VLM_dataset(
-            args.train_dir, 
-            'train', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
-    )
-
-    if args.distributed:
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+def get_taskvar(tasks: Tuple[str, ...], root: Path):
+    # 确定训练的任务
+    if 'all' in list(args.tasks):
+        train_tasks =  [
+            'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
+            'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
+            'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
+            'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
+            'stack_cubes_color', 'stack_cubes_size', 'stack_cubes_relative', 'stack_cubes_shape',
+            'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
+            'open_drawer',
+            'open_door_complex'
+            ]
     else:
-        sampler = None
+        train_tasks = list(args.tasks)
 
-    loader = torch.utils.data.DataLoader(  
-            dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=sampler, 
-            drop_last=True,
-            persistent_workers=True) #,persistent_workers=True
-    
-    return loader, sampler
+    task_var = []
 
+    for task in train_tasks:
+        path = root / task
+        variations = os.listdir(path)
+        for var in variations:
+            task_var.append((task, var))
 
-def get_val_loaders(args: Arguments) -> Optional[List[DataLoader]]:
-    
-    dataset = VLM_dataset(
-            args.valid_dir,
-            'valid', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
-    )
-
-    if args.distributed:
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-    else:
-        sampler = None
-
-    loader = torch.utils.data.DataLoader(  
-            dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=sampler, 
-            drop_last=True,
-            persistent_workers=True) #,persistent_workers=True
-    
-    return loader
-
-
-def get_model(args: Arguments) -> Tuple[optim.Optimizer, Hiveformer]:
-    device = torch.device('cuda', args.gpu)
-
-    max_episode_length = 200
-    model = Hiveformer(
-        depth=args.depth,
-        dim_feedforward=args.dim_feedforward,
-        hidden_dim=args.hidden_dim,
-        instr_size=args.instr_size,
-        mask_obs_prob=args.mask_obs_prob,
-        max_episode_length=max_episode_length,
-        num_words=args.num_words,
-        num_layers=args.num_layers,
-    )
-    # depth: int = 4
-    # dim_feedforward: int = 64
-    # hidden_dim: int = 64
-    # instr_size: int = 768
-    # mask_obs_prob: float = 0.0
-    # num_layers: int = 1
-    # num_words: int = 80
-    model=model.to(device)
-
-    optimizer = torch.optim.Adam(model.parameters(),args.lr)
-
-    print("Number of parameters:")
-    model_params = count_parameters(model)
-    print("- model", model_params)
-    print("Total", model_params)
-
-    return optimizer, model
+    return task_var
 
 def main(gpu, ngpus_per_node, args):
 
@@ -456,19 +333,8 @@ def main(gpu, ngpus_per_node, args):
     random.seed(args.seed)
 
     # 确定训练的任务
-    if 'all' in list(args.tasks):
-        args.train_tasks =  [
-            'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
-            'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
-            'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
-            'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-            'stack_cubes_color', 'stack_cubes_size', 'stack_cubes_relative', 'stack_cubes_shape',
-            'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-            'open_drawer',
-            'open_door_complex'
-            ]
-    else:
-        args.train_tasks = list(args.tasks)
+    train_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.train_dir)
+    valid_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.valid_dir)
 
     # 处理 checkpoint 存放的路径,只有主进程才生成 tensorboard 文件
     if args.rank == 0:
@@ -562,16 +428,12 @@ def main(gpu, ngpus_per_node, args):
         checkpointer = None
 
     # 构建训练集和 train_loader
-    train_dataset = VLM_dataset(
-            args.train_dir, 
-            'train', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
+    train_dataset = My_Dataset(
+        root=args.train_dir,
+        taskvar=train_taskvar,
+        max_episode_length=args.maxAction,
+        cache_size=args.cache_size,
+        training=True,
     )
 
     if args.distributed:
@@ -590,16 +452,12 @@ def main(gpu, ngpus_per_node, args):
             persistent_workers=args.persistent_workers) #,persistent_workers=True
     
     # 构建验证集和 val_loader
-    val_dataset = VLM_dataset(
-            args.valid_dir,
-            'valid', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
+    val_dataset = My_Dataset(
+        root=args.valid_dir,
+        taskvar=valid_taskvar,
+        max_episode_length=args.maxAction,
+        cache_size=args.cache_size,
+        training=False,
     )
 
     if args.distributed:

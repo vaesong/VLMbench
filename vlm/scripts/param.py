@@ -14,10 +14,10 @@ class Param:
 
 
         # Data preparation
-        self.parser.add_argument('--batch_size', type=int, default=64, metavar='N',
+        self.parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='input batch size for training (default: 8)')
-        self.parser.add_argument('--workers', type=int, default=8) #default=32
-        self.parser.add_argument('--maxInput', type=int, default=80, help="max input instruction")
+        self.parser.add_argument('--workers', type=int, default=4) #default=32
+        self.parser.add_argument('--maxInput', type=int, default=75, help="max input instruction")
         self.parser.add_argument('--maxAction', type=int, default=10, help='Max Action sequence')
         self.parser.add_argument('--ignoreid', type=int, default=-100)
         self.parser.add_argument("--loadOptim",action="store_const", default=False, const=True)
@@ -48,12 +48,12 @@ class Param:
 
         self.parser.add_argument('--preprocess', action='store_true', 
                 help="whether preprocess the data. Next time can directly use. Add if you don't want it.")
-        self.parser.add_argument('--unused_camera_list', nargs='+',default=['left_shoulder', 'right_shoulder', 'front','wrist'])
+        self.parser.add_argument('--unused_camera_list', nargs='+',default=['open_drawer', 'open_door_complex', 'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size'])
         # default=['left_shoulder', 'right_shoulder', 'overhead','wrist','front']
         self.parser.add_argument('--use_fail_cases', action='store_true', help="add if use the fail cases")
         self.parser.add_argument('--sample_numbers', type=int, default=0, help="downsample from total demonstrations")
         self.parser.add_argument('--pin_memory', action='store_true', help="do not use if the RAM is small")
-        self.parser.add_argument('--train_tasks', nargs='+', type=str, default =None)
+        self.parser.add_argument('--train_tasks', nargs='+', type=str, default = None)
         self.parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
         self.parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=False)
         self.parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
@@ -63,7 +63,7 @@ class Param:
                                 help='Print log message at this many iterations (default: 10)')
         self.parser.add_argument('--log-freq', default=1, type=int,
                                 help='Print log message at this many iterations (default: 1)')
-        self.parser.add_argument('--gpu', default=1, type=int,
+        self.parser.add_argument('--gpu', default=0, type=int,
                                 help='GPU id to use.')
         self.parser.add_argument('--checkpoint_path', default='/home/zp_3c/liuchang/vlmbench/weights', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
@@ -78,7 +78,7 @@ class Param:
                 help='number of nodes for distributed training')
         self.parser.add_argument('--rank', default=0, type=int,
                         help='node rank for distributed training')
-        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23461', type=str,
+        self.parser.add_argument('--dist-url', default='tcp://127.0.0.1:23454', type=str,
                         help='url used to set up distributed training')
         self.parser.add_argument('--dist-backend', default='nccl', type=str,
                         help='distributed backend')
@@ -87,7 +87,7 @@ class Param:
                                 'N processes per node, which has N GPUs. This is the '
                                 'fastest way to use PyTorch for either single node or '
                                 'multi node data parallel training')
-        self.parser.add_argument('--gpu_number', type=int, default=2)
+        self.parser.add_argument('--gpu_number', type=int, default=3)
         self.parser.add_argument('--gpu_start', type=int, default=0)
 
         # HOP

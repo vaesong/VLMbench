@@ -65,14 +65,15 @@ class VLNBERT(nn.Module):
         # resnet 152
         resnet152 = models.resnet152(pretrained=True)
         resnet152.fc = nn.Linear(2048,2048)
+        resnet152.conv1 = nn.Conv2d(6, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         for parm in resnet152.parameters():
-                parm.requires_grad = False 
+            parm.requires_grad = False 
         self.resnet152=resnet152
 
 
     def forward(self, mode, sentence, token_type_ids=None,
                 attention_mask=None, lang_mask=None, vis_mask=None,
-                position_ids=None, action_feats=None, pano_feats=None, img=None,task=None):
+                position_ids=None, action_feats=None, pano_feats=None, img=None,task=None,test_only=False):
 
         if mode == 'language':
             init_state, encoded_sentence = self.vln_bert(mode, sentence, attention_mask=attention_mask, lang_mask=lang_mask)
@@ -86,11 +87,11 @@ class VLNBERT(nn.Module):
             # state_with_action = self.action_LayerNorm(state_with_action)
             # state_feats = torch.cat((state_with_action.unsqueeze(1), sentence[:,1:,:]), dim=1)
             state_feats = sentence
-            if args.test_only:
+            if test_only:
                 candidate_feat=torch.zeros([1,img.shape[1],2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
             else:
                 candidate_feat=torch.zeros([args.batch_size,img.shape[1],2048+8*args.action_repeat],dtype=torch.float).to(state_feats.device)
-            for i in range(args.batch_size):
+            for i in range(candidate_feat.shape[0]):
                 rgb = img[i].permute(0,3,1,2).float() 
                 rgb = self.resnet152(rgb)
                 action_feat = action_feats[i].repeat(1,args.action_repeat)

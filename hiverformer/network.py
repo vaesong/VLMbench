@@ -344,19 +344,19 @@ class CrossTransformer(nn.Module):
         padding_mask: torch.Tensor,
         instruction: torch.Tensor,
     ):
-        B, T, K, C = x.shape
+        B, T, K, C = x.shape    # torch.Size([16, 10, 192, 64])
 
         # Cross attention
-        input_tensor = einops.rearrange(x, "b t k c -> (b t) k c")
+        input_tensor = einops.rearrange(x, "b t k c -> (b t) k c")      # torch.Size([160, 192, 64])
         ctx_tensor = einops.rearrange(x, "b t k c -> (b t) k c")
-        ctx_tensor = einops.repeat(ctx_tensor, "(b t) k c -> (b t) (tp k) c", tp=T, t=T)
+        ctx_tensor = einops.repeat(ctx_tensor, "(b t) k c -> (b t) (tp k) c", tp=T, t=T)    # torch.Size([160, 1920, 64])
 
-        ctx_attn_mask = torch.triu(torch.ones((T, T)), diagonal=1).to(x.device)
+        ctx_attn_mask = torch.triu(torch.ones((T, T)), diagonal=1).to(x.device) 
         ctx_attn_mask = einops.repeat(ctx_attn_mask, "t tp -> (b t) tp", b=B)
         ctx_attn_mask = ctx_attn_mask.to(x.dtype)
         ctx_attn_mask[ctx_attn_mask == 1] = -float("inf")
         ctx_attn_mask = einops.repeat(
-            ctx_attn_mask, "bt t -> bt nh k (t kp)", nh=1, k=K, kp=K
+            ctx_attn_mask, "bt t -> bt nh k (t kp)", nh=1, k=K, kp=K    # torch.Size([160, 1, 192, 1920])
         )
 
         ctx_tensor = self._add_instruction(instruction, ctx_tensor)
@@ -653,33 +653,33 @@ class Hiveformer(nn.Module):
 
         rgb_obs_ = self.rgb_preprocess(rgb_obs_)
 
-        x = self.to_feat(rgb_obs_)  # torch.Size([288, 16, 180, 180])
+        x = self.to_feat(rgb_obs_)  # torch.Size([480, 16, 128, 128])
 
         # encoding features
         enc_feat = []
         for l in self.feature_encoder:
             x, res = l(x)
 
-            res = einops.rearrange(res, "(b t n) c h w -> b t n c h w", n=N, t=T)   # torch.Size([8, 12, 3, 16, 90, 90])
+            res = einops.rearrange(res, "(b t n) c h w -> b t n c h w", n=N, t=T)  
             res = res[padding_mask]
             res = einops.rearrange(res, "bpad n c h w -> (bpad n) c h w")
             enc_feat.append(res)
 
-        x = einops.rearrange(x, "(b t n) c h w -> b t n c h w", n=N, t=T)   # torch.Size([8, 12, 3, 16, 12, 12])
+        x = einops.rearrange(x, "(b t n) c h w -> b t n c h w", n=N, t=T)   # torch.Size([16, 10, 3, 16, 8, 8])
 
         # random masking
-        mask_obs = generate_mask_obs(self._mask_obs_prob, (B, T)).to(device)
+        mask_obs = generate_mask_obs(self._mask_obs_prob, (B, T)).to(device)     # torch.Size([16, 10]) 似乎不少0
         x[mask_obs.bool()] = 0
 
-        x_pad = x[padding_mask]
-        x_pad = einops.rearrange(x_pad, "bpad n c h w -> (bpad n) c h w")
+        x_pad = x[padding_mask]     # torch.Size([65, 3, 16, 8, 8]), 65个有效的？
+        x_pad = einops.rearrange(x_pad, "bpad n c h w -> (bpad n) c h w")   # torch.Size([195, 16, 8, 8])
         backbone = [x_pad]
 
         # Add extra channels with Point Clouds
-        pcd = einops.rearrange(pc_obs, "b t n c h w -> (b t n) c h w")
-        pcd = F.avg_pool2d(pcd, 16) # 这里把 180，180 转为 11，11
-        pcd = einops.rearrange(pcd, "(b t n) c h w -> b t n c h w", b=B, t=T, n=N)
-        x = torch.cat([x, pcd], 3)
+        pcd = einops.rearrange(pc_obs, "b t n c h w -> (b t n) c h w")  # torch.Size([480, 3, 128, 128])
+        pcd = F.avg_pool2d(pcd, 16) # torch.Size([480, 3, 8, 8])
+        pcd = einops.rearrange(pcd, "(b t n) c h w -> b t n c h w", b=B, t=T, n=N)  # torch.Size([16, 10, 3, 3, 8, 8])
+        x = torch.cat([x, pcd], 3)  # torch.Size([16, 10, 3, 19, 8, 8])
 
         # Add history channels to the backbone
         ce = self.encoding(x, padding_mask, instruction, gripper)
@@ -687,7 +687,7 @@ class Hiveformer(nn.Module):
         ce = einops.repeat(ce, "bpad n c h w -> (bpad n) c h w")
         backbone.append(ce)
 
-        x = torch.cat(backbone, dim=1)
+        x = torch.cat(backbone, dim=1)  # cat([x_pad, ce], dim=1)
 
         return self.head(
             N,
@@ -705,12 +705,12 @@ class Hiveformer(nn.Module):
         instruction: torch.Tensor,
         gripper: torch.Tensor,
     ):
-        B, T, N, C, H, W = x.shape
+        B, T, N, C, H, W = x.shape          # torch.Size([16, 10, 3, 19, 8, 8])
 
         position = torch.arange(T).type_as(x).unsqueeze(0).long()
         pos_emb = self.position_embedding(position)
         pos_emb = self.position_norm(pos_emb).squeeze(0)
-        pos_emb = einops.repeat(pos_emb, "t d -> b t n h w d", b=B, n=N, h=H, w=W)
+        pos_emb = einops.repeat(pos_emb, "t d -> b t n h w d", b=B, n=N, h=H, w=W)  # torch.Size([16, 10, 3, 8, 8, 64])
 
         pix_id = torch.arange(H * W).type_as(x).unsqueeze(0).long()
         pix_emb = self.pix_embedding(pix_id)
@@ -730,13 +730,13 @@ class Hiveformer(nn.Module):
         xe = self.visual_norm(xe)
         xe += pix_emb + cam_emb + pos_emb
 
-        xe = einops.rearrange(xe, "b t n h w c -> b t (n h w) c")
+        xe = einops.rearrange(xe, "b t n h w c -> b t (n h w) c")   # torch.Size([16, 10, 192, 64])
 
-        ce = self.cross_transformer(xe, padding_mask, instruction)
+        ce = self.cross_transformer(xe, padding_mask, instruction)  # torch.Size([160, 192, 64])
 
         ce = einops.rearrange(ce, "(b t) (n h w) c -> b t n c h w", n=N, t=T, h=H, w=W)
 
-        return ce
+        return ce   # torch.Size([16, 10, 3, 64, 8, 8])
 
     def head(
         self,
@@ -747,7 +747,7 @@ class Hiveformer(nn.Module):
         padding_mask,
         instruction: torch.Tensor,
     ) -> Output:
-        pc_obs = pc_obs[padding_mask]
+        pc_obs = pc_obs[padding_mask]   # torch.Size([65, 3, 3, 128, 128])
         # decoding features for translation
         enc_feat.reverse()
         xtr = x  # mypy
@@ -758,15 +758,15 @@ class Hiveformer(nn.Module):
             else:
                 xtr = l(torch.cat([xtr, enc_feat[i]], dim=1))
 
-        xt = xtr
+        xt = xtr    # torch.Size([195, 16, 128, 128])
 
         # predicting projected position
-        xt = self.maps_to_coord(xt)
+        xt = self.maps_to_coord(xt)     # torch.Size([195, 1, 128, 128])
         xt = einops.rearrange(xt, "(b n) ch h w -> b (n ch h w)", n=N, ch=1)
         xt = torch.softmax(xt / 0.1, dim=1)
         attn_map = einops.rearrange(
             xt, "b (n ch h w) -> b n ch h w", n=N, ch=1, h=128, w=128
-        )
+        )   # torch.Size([65, 3, 1, 128, 128])
 
         pc_obs = einops.rearrange(pc_obs, "b n ch h w -> b n ch h w")
         position = einops.reduce(pc_obs * attn_map, "b n ch h w -> b ch", "sum")
@@ -799,9 +799,9 @@ class Hiveformer(nn.Module):
         position += z_offset
 
         return {
-            "position": position,
-            "rotation": rotation,
-            "gripper": torch.sigmoid(xr[:, -1:]),
-            "attention": attn_map,
-            "task": task,
+            "position": position,                              # torch.Size([123, 3])
+            "rotation": rotation,                              # torch.Size([123, 4])
+            "gripper": torch.sigmoid(xr[:, -1:]),              # torch.Size([123, 1])
+            "attention": attn_map,                             # torch.Size([123, 3, 1, 128, 128])
+            "task": task,                                      # torch.Size([16, 106])
         }

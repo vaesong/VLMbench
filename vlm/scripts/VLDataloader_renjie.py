@@ -18,7 +18,7 @@ from vlm.scripts.utils import keypoint_discovery,mask_tokens,max_sperate_index
 from pytorch_transformers import  BertTokenizer
 # add hiverformer
 from torch.nn import functional as F
-from hiverformer.utils import obs_to_attn
+from hiverformer.utils import obs_to_attn, DataTransform
 
 class VLM_dataset(Dataset):
     def __init__(self, root, setd, img_size=(256, 256), 
@@ -27,20 +27,21 @@ class VLM_dataset(Dataset):
         self.root = root
         self.setd = setd
         self.dataset_path = Path(os.path.join(self.root, self.setd))
-        self.episode_list = []
-        self.variation_list = []
         self.task_list = {}
+        self.variation_list = []
+        self.episode_list = []   
         self.fail_cases_list = []
         self.read_lists()
+        self.cameras = args.cameras
         self.use_fail_cases = use_fail_cases
+        self.mode = args.mode
         if train_tasks is None:
             train_tasks =  [
                             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
                             'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
                             'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
                             'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-                            'stack_cubes_color', 'stack_cubes_size',
-                            'stack_cubes_relative', 'stack_cubes_shape',
+                            'stack_cubes_color', 'stack_cubes_size', 'stack_cubes_relative', 'stack_cubes_shape',
                             'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
                             'open_drawer',
                             'open_door_complex'
@@ -60,6 +61,7 @@ class VLM_dataset(Dataset):
         self.random_sample = random_sample
         self.img_size = img_size
         self.preprocess = preprocess
+        self._transform = DataTransform((0.75, 1.25))
 
         self.obs_config = ObservationConfig()
         self.obs_config.set_all(True)
@@ -131,20 +133,7 @@ class VLM_dataset(Dataset):
     def __getitem__(self, index):
         episode = self.episode_list[index]
         output_dict = self.get_episode(episode,fake=False)
-        # itm data 
-        fake_episode = random.choice(self.episode_list)
-        while str(episode.parents[2]).split("_")[:2] == str(fake_episode.parents[2]).split("_")[:2]: # do it untill their tasks are totally different
-            fake_episode = random.choice(self.episode_list)
-        prob_itm = np.random.random()  #随机概率，random_episode = episode or fake_episode
-        if  prob_itm <= 0.5:
-                ismatch = 1
-                # random_episode = episode
-                output_dict["random_traj"] = output_dict["traj"]  
-                output_dict["ismatch"] = ismatch
-        elif prob_itm <= 1:
-                ismatch = 0
-                output_dict["random_traj"] = self.get_episode(fake_episode,fake=True)["traj"]
-                output_dict["ismatch"] = ismatch           
+        
         return output_dict
 
     def get_episode(self,episode,fake):
@@ -158,29 +147,30 @@ class VLM_dataset(Dataset):
         
         sequence_length = len(demo_temple._observations)
         obs_select_inds = np.arange(sequence_length)
-        if fake == False:
-            if self.sample_numbers:
-                if self.random_sample:
-                    obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
+        lang = demo_temple.high_level_instructions[0]
+        
+        if self.sample_numbers:
+            if self.random_sample:
+                obs_select_inds = np.sort(np.random.choice(obs_select_inds, self.sample_numbers, replace=False))
+            else:
+                obs_select_inds = obs_select_inds[0:self.sample_numbers]
+        split_by_waypoint = True
+        # 根据watpoints切分
+        # obs_select_inds：选择出每个waypoint的开始index
+        if split_by_waypoint:
+            # lang = demo_temple.high_level_instructions[0]
+            obs_select_inds = [0]
+            previous_waypoint="waypoint0"
+            # all_way_points只存了分割点的waypoint
+            self.all_waypoints = [previous_waypoint]
+            for i, obs in enumerate(demo_temple._observations):
+                if obs.current_waypoint_name == previous_waypoint:
+                    continue
                 else:
-                    obs_select_inds = obs_select_inds[0:self.sample_numbers]
-            split_by_waypoint = True
-            # 根据watpoints切分
-            # obs_select_inds：选择出每个waypoint的开始index
-            if split_by_waypoint:
-                lang = demo_temple.high_level_instructions[0]
-                obs_select_inds = [0]
-                previous_waypoint="waypoint0"
-                # all_way_points只存了分割点的waypoint
-                self.all_waypoints = [previous_waypoint]
-                for i, obs in enumerate(demo_temple._observations):
-                    if obs.current_waypoint_name == previous_waypoint:
-                        continue
-                    else:
-                        previous_waypoint = obs.current_waypoint_name
-                        self.all_waypoints.append(previous_waypoint)
-                        obs_select_inds.append(i)
-                        lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
+                    previous_waypoint = obs.current_waypoint_name
+                    self.all_waypoints.append(previous_waypoint)
+                    obs_select_inds.append(i)
+                    lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
         if self.preprocess:
             preprocess_data_folder = self.dataset_path/episode/'preprocess_data'
 
@@ -230,9 +220,11 @@ class VLM_dataset(Dataset):
             episode_name = episode.name
             variation_number = int(variation_path.name.replace('variation',''))
 
-            key_frames = keypoint_discovery(demo_temple._observations)
-            action=[]
-            # traj=[]
+            if self.mode == 'waypoint':
+                key_frames = obs_select_inds
+            else:
+                key_frames = keypoint_discovery(demo_temple._observations)
+
             select_frames=[]
 
             # 获取抽样轨迹  
@@ -246,62 +238,73 @@ class VLM_dataset(Dataset):
             if (sequence_length-1) not in select_frames:
                 select_frames.append(sequence_length-1)
             
-            sperate_index = max_sperate_index(select_frames)
-            range1 = select_frames[sperate_index-1]
-            range2 = select_frames[sperate_index]
-                        
-            random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
-            random_index2 = random.randint(random_index1+1,range2-1)
-            select_frames.insert(sperate_index,random_index2)
-            select_frames.insert(sperate_index,random_index1)
+            if self.mode == 'keyframe':
+                sperate_index = max_sperate_index(select_frames)
+                range1 = select_frames[sperate_index-1]
+                range2 = select_frames[sperate_index]
 
-            valid_action_length = len(select_frames)
+                random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
+                random_index2 = random.randint(random_index1+1,range2-1)
+                select_frames.insert(sperate_index,random_index2)
+                select_frames.insert(sperate_index,random_index1)
+
+            valid_action_length = len(select_frames) - 1
 
             demos = get_stored_demos(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
-            
-            rgb = []
-            rgbs = []
-            pcd = []
-            pcds = []
+
+            rgbs = torch.Tensor([])
+            pcds = torch.Tensor([])
+            states = torch.Tensor([])
             for frame in select_frames:
+                rgb = torch.Tensor([])
+                pcd = torch.Tensor([])
+                ac = torch.Tensor([])
+
                 obs=demos[0]._observations[frame]
-                action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                # for i in range(0,3):
-                rgb.append(obs.front_rgb)
-                rgb.append(obs.overhead_rgb)
-                rgb.append(obs.wrist_rgb)
-                pcd.append(obs.front_point_cloud)
-                pcd.append(obs.overhead_point_cloud)
-                pcd.append(obs.wrist_point_cloud)
+                ac = torch.tensor(np.append(obs.gripper_pose,obs.gripper_open))
+                rgb = torch.cat([torch.Tensor(obs.left_shoulder_rgb).unsqueeze(0), torch.Tensor(obs.right_shoulder_rgb).unsqueeze(0), torch.Tensor(obs.wrist_rgb).unsqueeze(0)])
+                pcd = torch.cat([torch.Tensor(obs.left_shoulder_point_cloud).unsqueeze(0), torch.Tensor(obs.right_shoulder_point_cloud).unsqueeze(0), torch.Tensor(obs.wrist_point_cloud).unsqueeze(0)])
+                
+                rgbs = torch.cat([rgbs, rgb.unsqueeze(0)])
+                pcds = torch.cat([pcds, pcd.unsqueeze(0)])
+                states = torch.cat([states, ac.unsqueeze(0)])
 
-                rgbs.append(rgb.copy())
-                pcds.append(pcd.copy())
-                rgb.clear()
-                pcd.clear()
-                # rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
-                # for rgb in rgbs:
-                #     if rgb is not None:
-                #         traj.append(rgb)
+            action = states[1:]         # except for the start index action
+            rgbs = rgbs[:-1]            # except for the end index rgb   T, N, H, W, C
+            pcds = pcds[:-1]            # except for the end index pcd
+            gripper = states[:-1]       # except for the end index action
 
-            action = action[:-1]
-            pad_len = max_traj_len - len(rgbs)
-            padding_mask = list([True] * valid_action_length + [False] * pad_len)
-            while len(rgbs) < max_traj_len: # padding to max_traj_len
-                action.append(action[-1])
-                # traj.append(traj[-1])
-                rgbs.append(rgbs[-1])
-                pcds.append(pcds[-1])
-            action.append(action[-1])
-            
-            # 给所选的关键帧 添加 attent
-            cameras = ['front','overhead','wrist']
-            attn_indices = [{cam: obs_to_attn(demos[0]._observations[f], cam) for cam in cameras} for f in select_frames]
+            rgbs = rgbs.permute(0,1,4,2,3)
+            pcds = pcds.permute(0,1,4,2,3)
+            # normalise to [-1, 1]
+            rgbs = rgbs / 255.0
+            rgbs = 2 * (rgbs - 0.5)
+
+            pad_len = max_traj_len - valid_action_length
+            padding_mask = torch.tensor([True] * valid_action_length + [False] * pad_len)
+
+            # padding
+            img_pad_vec = [0, 0] * rgbs.dim()
+            img_pad_vec[-1] = pad_len
+            rgbs = F.pad(rgbs, img_pad_vec, value=0)
+            pcds = F.pad(pcds, img_pad_vec, value=0)
+
+            action_pad_vec = [0, 0] * action.dim()
+            action_pad_vec[-1] = pad_len
+            action = F.pad(action, action_pad_vec, value=0)
+            gripper = F.pad(gripper, action_pad_vec, value=0)
+
+            tframe_ids = torch.tensor(np.array(range(valid_action_length)))
+            tframe_ids = F.pad(tframe_ids, (0, pad_len), value=-1)
+
+            use_frames = select_frames[:-1]
+            attn_indices = [{cam: obs_to_attn(demos[0]._observations[f], cam) for cam in self.cameras} for f in use_frames]
 
             attns = torch.Tensor([])
-            for i in range(0, len(select_frames)):
+            for i in range(0, len(use_frames)):
                 attn_cams = torch.Tensor([])
-                for cam in cameras:
+                for cam in self.cameras:
                     u, v = attn_indices[i][cam]
                     attn = torch.zeros((1, 1, 128, 128))
                     if not (u < 0 or u > 127 or v < 0 or v > 127):
@@ -310,44 +313,27 @@ class VLM_dataset(Dataset):
                 attns = torch.cat([attns, attn_cams.unsqueeze(0)])  # num 3(cameras) 1 360 360
             pad_vec = [0] * (2 * attns.dim())
             pad_vec[-1] = pad_len
-            attns = F.pad(attns, pad_vec)            
+            attns = F.pad(attns, pad_vec)
+            rgbs = torch.cat([rgbs, attns], 2)
 
-            if fake == True:
-                output_dict = {
-                # "img":img,
-                "traj": np.array(rgbs)}
-                return output_dict
-                  
-            random_history_index=random.randint(1,valid_action_length-1)
-            action_label = action[random_history_index]
-            # history_traj = copy.deepcopy(traj)[:]
-            # action = action[random_history_index]
+            # data augmentation
+            modals = self._transform(rgbs=rgbs, pcds=pcds)
+            rgbs = modals["rgbs"]
+            pcds = modals["pcds"]
 
-            maxlength=self.args.maxInput
-            # original tokens
-            instr_tokens = self.tokenizer.tokenize(lang)
-            temp_instr_tokens = ['[CLS]'] + instr_tokens + ['[SEP]']
-            instr_tokens = temp_instr_tokens + ['[PAD]'] * (maxlength-len(temp_instr_tokens))
-            instr_tokens=self.tokenizer.convert_tokens_to_ids(instr_tokens)
-            
-            # mask tokens
-            mask_instr_tokens,mlm_label=mask_tokens(torch.LongTensor(instr_tokens),self.tokenizer)
             output_dict = {
-                # "img":img,
-                "traj": np.array(rgbs),
-                # "target": target,
-                "language": np.array(instr_tokens), 
-                "mask_language":np.array(mask_instr_tokens),
-                "mlm_label":np.array(mlm_label),
-                "random_history_index":random_history_index,
-                "valid_length":valid_action_length,
-                "action":np.array(action),
-                "action_label":action_label,
-                # "state":state,
-                "rgbs": np.array(rgbs),
-                "attns": attns,
-                "pcds": np.array(pcds),
-                "padding_mask": np.array(padding_mask),
+                # instruction
+                "language": str(lang), 
+                # img and pcd
+                "rgbs": rgbs,
+                "pcds": pcds,
+                # "attns": attns,
+                # state
+                "action": action,
+                "gripper": gripper,
+                # others
+                "padding_mask": padding_mask,
+                "valid_length": valid_action_length,
                 "task": str(task_name)
             }
             return output_dict

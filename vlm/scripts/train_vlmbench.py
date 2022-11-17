@@ -1,44 +1,21 @@
-import json
-import os
-import sys
 import numpy as np
-import random
-import math
-import time
-
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch import optim
-import torch.nn.functional as F
 # from env import R2RBatch
 #import utils
 #from utils import padding_idx, print_progress
 import model_PREVALENT
 import os
 from pickle import NONE
-import time
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 import torch
-from torch._C import device
-import torch.multiprocessing as mp
-import torch.distributed as dist
-import torch.backends.cudnn as cudnn
-import argparse
-import warnings
-from distutils.util import strtobool
-import sys
-from os.path import join, dirname, abspath, isfile
-import torch.nn.functional as F
 from vlm.scripts.VLDataloader_custom import VLM_dataset
-from pytorch_transformers import (BertConfig, BertTokenizer)
+from pytorch_transformers import (BertConfig)
 import utils
 from tensorboardX import SummaryWriter
 from pytorch_transformers import BertConfig
 from pytorch_transformers.modeling_bert import BertOnlyMLMHead
-from pytorch_transformers import (WEIGHTS_NAME, AdamW, WarmupLinearSchedule,
-                                  BertConfig, BertForMaskedLM, BertTokenizer)
 from param import args
 # def collate_fn(batch):
 # #     output_batch = []

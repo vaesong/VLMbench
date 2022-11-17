@@ -79,7 +79,6 @@ def get_heightmap(points, colors, bounds, pixel_size):
         colormap[py, px, c] = colors[:, c]
     return heightmap, colormap
 
-
 def get_pointcloud(depth, intrinsics):
     """Get 3D pointcloud from perspective depth image.
   

@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import transform
+import einops
 # from param import args
 
 # Identify way-point in each RLBench Demo
@@ -92,6 +94,4 @@ def length2mask(length, size=None):
     mask = (torch.arange(size, dtype=torch.int64).unsqueeze(0).repeat(batch_size, 1)
                 > (torch.LongTensor(length) - 1).unsqueeze(1))
     return mask
-
-
 

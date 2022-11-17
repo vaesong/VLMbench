@@ -15,6 +15,7 @@ from num2words import num2words
 pickle.DEFAULT_PROTOCOL=pickle.HIGHEST_PROTOCOL
 import random
 from vlm.scripts.utils import keypoint_discovery,mask_tokens,max_sperate_index
+from cliport.utils import utils 
 from pytorch_transformers import  BertTokenizer
 
 class VLM_dataset(Dataset):
@@ -259,16 +260,23 @@ class VLM_dataset(Dataset):
 
             valid_action_length = len(select_frames)
 
-            demos = get_stored_demos_nodepth(1, False, self.dataset_path, variation_number, 
+            demos = get_stored_demos(1, False, self.dataset_path, variation_number, 
                                      task_name, self.obs_config , episode_name,selected_frame=select_frames)   
 
+            z_max = 1.2
+            if 'door' in str(episode) or 'drawer' in str(episode):
+                z_max = 1.8
+            bounds = np.array([[-0.05,0.67],[-0.45, 0.45], [0.7, z_max]])
+            pixel_size = 5.625e-3
             for frame in select_frames:
                 obs=demos[0]._observations[frame]
                 action.append((np.append(obs.gripper_pose,obs.gripper_open)))
-                rgbs=[obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
-                for rgb in rgbs:
-                    if rgb is not None:
-                        traj.append(rgb)
+                rgbs = [obs.front_rgb,obs.wrist_rgb,obs.left_shoulder_rgb,obs.right_shoulder_rgb,obs.overhead_rgb]
+                pcds = [obs.front_point_cloud, obs.wrist_point_cloud, obs.left_shoulder_point_cloud, obs.right_shoulder_point_cloud, obs.overhead_point_cloud]
+                cmap, hmap = utils.get_fused_heightmap(rgbs, pcds, bounds, pixel_size)
+                hmap = np.tile(hmap[..., None], (1,1,3)) # 第三维重复3次
+                img = np.concatenate([cmap, hmap], axis=-1)
+                traj.append(img)
             while len(traj) < max_traj_len: # padding to max_traj_len
                 action.append(action[-1])
                 traj.append(traj[-1])

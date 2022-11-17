@@ -121,6 +121,7 @@ def get_input_feat(img,action,step,args):
 
 def main(gpu, ngpus_per_node, args):
 
+        #设置训练gpu
         args.gpu = gpu + args.gpu_start
         if args.gpu is not None:
                 print("Use GPU: {} for training".format(args.gpu))
@@ -132,7 +133,7 @@ def main(gpu, ngpus_per_node, args):
                 dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                         world_size=args.world_size, rank=args.rank)
 
-
+        # 初始化训练数据集
         train_dataset = VLM_dataset(args.data_dir, 'train', img_size=args.img_size, unused_camera_list = args.unused_camera_list, preprocess = args.preprocess, 
                     use_fail_cases = args.use_fail_cases, sample_numbers = args.sample_numbers,train_tasks=args.train_tasks ,args=args)
         # 设置采样
@@ -143,25 +144,26 @@ def main(gpu, ngpus_per_node, args):
 
         train_loader = torch.utils.data.DataLoader(  
                 train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-                num_workers=args.workers, pin_memory=True, sampler=train_sampler, 
-                drop_last=True,persistent_workers=True) #,persistent_workers=True
+                num_workers=0, pin_memory=True, sampler=train_sampler, 
+                drop_last=True,persistent_workers=False) #,persistent_workers=True
                 
+        # 初始化 1：SummaryWriter记录数据 2：setting.txt记录参数
         log_dir = 'snap/%s' % args.name
         if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
         writer = SummaryWriter(log_dir=log_dir)
         argsDict = args.__dict__
         with open(log_dir+'/setting.txt', 'w') as f:
-                f.writelines('------------------ start ------------------' + '\n')
                 for eachArg, value in argsDict.items():
                         f.writelines(eachArg + ' : ' + str(value) + '\n')
-                # f.writelines('------------------- end -------------------')
 
+        # 设置训练损失 MLM ITM使用分类损失，ACTION使用动作损失
         criterion = nn.CrossEntropyLoss(ignore_index=-1)
-        criterion2 = nn.L1Loss()
+        criterion2 = nn.MSELoss()
          
         start_iter = 0
         
+        # 初始化 mlmhead 和 NextActionPrediction
         config = BertConfig.from_pretrained("/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997")
         config.img_feature_dim = args.vision_size
         config.img_feature_type = ""
@@ -174,18 +176,13 @@ def main(gpu, ngpus_per_node, args):
         mlmhead = BertOnlyMLMHead(config).cuda(args.gpu)
         is_match = NextActionPrediction(config.hidden_size, 2).cuda(args.gpu)
 
-        base_vocab = ['<PAD>', '<UNK>', '<EOS>']
-        padding_idx = base_vocab.index('<PAD>')
-
+        # 初始化模型
         vln_bert = model_PREVALENT.VLNBERT()
         # 如果采用 分布式训练
         if args.distributed:
                 if args.gpu is not None:
                         torch.cuda.set_device(args.gpu)
                         vln_bert.cuda(args.gpu)
-                        
-                        # args.batch_size = int(args.batch_size / ngpus_per_node)
-                        # args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
                         vln_bert = torch.nn.parallel.DistributedDataParallel(vln_bert, device_ids=[args.gpu], find_unused_parameters=True)
                 else:
                         vln_bert.cuda()
@@ -193,14 +190,10 @@ def main(gpu, ngpus_per_node, args):
         else:
                 vln_bert.cuda(args.gpu)
 
-        # critic = model_PREVALENT.Critic().cuda(args.gpu)
-        optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
-
-        
         if args.load is not None:
                 start_iter,vln_bert,optimizer = load(args.load,vln_bert,optimizer)
                 print("\nLOAD the model from {}, iteration ".format(args.load, start_iter))
-
+        optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
         vln_bert.train()
         timer = {"batch_time":AverageMeter('Time', ':6.3f')}
         for iter in range(1, args.iters+1):
@@ -234,8 +227,8 @@ def main(gpu, ngpus_per_node, args):
                         else :
                                 task = "action"
                                 language = batch_data["language"]
-                                img = batch_data["traj"]
-                        language_attention_mask = (language != padding_idx).long().cuda(args.gpu)
+                                img = batch_data["traj"].cuda(args.gpu)
+                        language_attention_mask = (language != 0).long().cuda(args.gpu)
                         token_type_ids = torch.zeros_like(language_attention_mask).long().cuda(args.gpu)                                               
                         # initial
                         language_inputs = {'mode':'language',
@@ -250,19 +243,20 @@ def main(gpu, ngpus_per_node, args):
                         action_length = 1
                         state_proj = None
                         # random_history_index=random.randint(1,min(batch_data["valid_length"].tolist())-1)
-                        while action_length < min(batch_data["valid_length"].tolist()):
-                                action_label=batch_data["action"][:,action_length,:]
+                        while action_length < max(batch_data["valid_length"].tolist()):
+                                action_label=batch_data["action"][:,action_length,:3] # only use xyz as label
                                 if task == "action":   
                                         # optimizer.zero_grad()
-                                        action = batch_data["action"][:,:action_length,:]     
-                                        step_img,step_action = get_input_feat(img,action,action_length,args)   
+                                        step_action = batch_data["action"][:,:action_length,:].cuda(args.gpu) 
+                                        step_img = img [:,:action_length,:,:,:].cuda(args.gpu) 
+                                        # step_action = get_input_feat(img,action,action_length,args)   
                                         # temp_img = img[:,:action_length,:,:]                                      
                                         visual_temp_mask=(utils.length2mask([action_length]*args.batch_size,action_length) == 0).long().cuda(args.gpu)
                                         action_length = action_length + 1
                                 else :
                                         step_img = img
                                         step_action = batch_data["action"].cuda(args.gpu)
-                                        action_length = 12
+                                        action_length = 15
                                         visual_temp_mask=(utils.length2mask(batch_data["valid_length"].tolist(),args.maxAction) == 0).long().cuda(args.gpu)
                                 visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda(args.gpu)
 
@@ -309,7 +303,7 @@ def main(gpu, ngpus_per_node, args):
                                         step_itm = step_itm + 1
                                         avg_acc_itm = total_acc_itm /(step_itm)
                                 elif task == "action":
-                                        action_loss = criterion2(action,action_label.cuda(args.gpu)) * 100
+                                        action_loss = criterion2(action[:,:3].float(),action_label.cuda(args.gpu).float()) * 100
                                         step_action_loss += action_loss
                                         total_action_loss += action_loss
                                         # loss.backward()
@@ -346,8 +340,8 @@ def main(gpu, ngpus_per_node, args):
                                 'ETA: {} / {}  '\
                                 'acc_mlm: {}  ' \
                                 'acc_itm: {} ' \
-                                'avg_action_loss:  {}'.format(iter, args.iters, batch_step+1, len(train_loader), 
-                        time_elapsed, time_left, time_estimate,acc_mlm, acc_itm, avg_action_loss)
+                                'step_action_loss:  {}'.format(iter, args.iters, batch_step+1, len(train_loader), 
+                        time_elapsed, time_left, time_estimate,avg_acc_mlm, avg_acc_itm, step_action_loss)
 
                         print(tmp_str)
                         

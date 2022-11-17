@@ -1,4 +1,6 @@
 from abc import abstractmethod, ABC
+import os
+import cv2
 import random
 import itertools
 import pickle
@@ -15,6 +17,8 @@ from torch import nn
 import torch.nn.functional as F
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
+from pyrep.objects.vision_sensor import VisionSensor
+from pyrep.objects.dummy import Dummy
 import einops
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
@@ -27,11 +31,72 @@ from rlbench.backend.exceptions import InvalidActionError
 from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as transforms_f
 
 
 Camera = Literal["wrist", "left_shoulder", "right_shoulder", "overhead", "front"]
 Instructions = Dict[str, Dict[int, torch.Tensor]]
 
+class DataTransform(object):
+    def __init__(self, scales):
+        self.scales = scales
+
+    def __call__(self, **kwargs: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Except tensors as T, N, C, H, W
+        """
+        keys = list(kwargs.keys())
+
+        if len(keys) == 0:
+            raise RuntimeError("No args")
+
+        # Continuous range of scales
+        sc = np.random.uniform(*self.scales)
+
+        t, n, c, raw_h, raw_w = kwargs[keys[0]].shape
+        kwargs = {n: arg.flatten(0, 1) for n, arg in kwargs.items()}
+        resized_size = [int(raw_h * sc), int(raw_w * sc)]
+
+        # Resize based on randomly sampled scale
+        kwargs = {
+            n: transforms_f.resize(
+                arg,
+                resized_size,
+                transforms.InterpolationMode.NEAREST
+                # if "pc" in n
+                # else transforms.InterpolationMode.BILINEAR,
+            )
+            for n, arg in kwargs.items()
+        }
+
+        # Adding padding if crop size is smaller than the resized size
+        if raw_h > resized_size[0] or raw_w > resized_size[1]:
+            right_pad, bottom_pad = max(raw_h - resized_size[1], 0), max(
+                raw_w - resized_size[0], 0
+            )
+            kwargs = {
+                n: transforms_f.pad(
+                    arg,
+                    padding=[0, 0, right_pad, bottom_pad],
+                    padding_mode="reflect",
+                )
+                for n, arg in kwargs.items()
+            }
+
+        # Random Cropping
+        i, j, h, w = transforms.RandomCrop.get_params(
+            kwargs[keys[0]], output_size=(raw_h, raw_w)
+        )
+
+        kwargs = {n: transforms_f.crop(arg, i, j, h, w) for n, arg in kwargs.items()}
+
+        kwargs = {
+            n: einops.rearrange(arg, "(t n) c h w -> t n c h w", t=t)
+            for n, arg in kwargs.items()
+        }
+
+        return kwargs
 
 class Sample(TypedDict):
     frame_id: torch.Tensor
@@ -92,7 +157,7 @@ class Mover:
         self._max_tries = max_tries
         self._disabled = disabled
 
-    def __call__(self, action: np.ndarray):
+    def __call__(self, action: np.ndarray,recorder,need_grasp_obj):
         if self._disabled:
             return self._task.step(action)
 
@@ -101,13 +166,14 @@ class Mover:
             action[7] = self._last_action[7].copy()
 
         images = []
+        other_obs = []
         try_id = 0
         obs = None
         terminate = None
         reward = 0
 
         for try_id in range(self._max_tries):
-            obs, reward, terminate, other_obs = self._task.step(action)
+            obs, reward, terminate = self._task.step(action,collision_checking=None,recorder = recorder, use_auto_move=True, need_grasp_obj = need_grasp_obj)
             if other_obs == []:
                 other_obs = [obs]
             for o in other_obs:
@@ -158,7 +224,7 @@ class Mover:
         self._step_id += 1
         self._last_action = action.copy()
 
-        return obs, reward, terminate, images
+        return obs, reward, terminate
 
 
 class Actioner:
@@ -230,7 +296,7 @@ class Actioner:
     def device(self):
         return next(self._model.parameters()).device
 
-
+# 计算视图中 gripper 的位置
 def obs_to_attn(obs, camera: str) -> Tuple[int, int]:
     extrinsics_44 = torch.from_numpy(obs.misc[f"{camera}_camera_extrinsics"]).float()
     extrinsics_44 = torch.linalg.inv(extrinsics_44)
@@ -247,6 +313,31 @@ def obs_to_attn(obs, camera: str) -> Tuple[int, int]:
 
     return u, v
 
+class Recorder(object):
+    def __init__(self) -> None:
+        cam_placeholder = Dummy('cam_cinematic_placeholder')
+        self.cam = VisionSensor.create([640, 360])
+        self.cam.set_pose(cam_placeholder.get_pose())
+        self.cam.set_parent(cam_placeholder)
+        self._snaps = []
+        self._fps=30
+
+    def take_snap(self):
+        self._snaps.append(
+            (self.cam.capture_rgb() * 255.).astype(np.uint8))
+    
+    def save(self, path):
+        print('Converting to video ...')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        video = cv2.VideoWriter(
+                path, cv2.VideoWriter_fourcc(*'MJPG'), self._fps,
+                tuple(self.cam.get_resolution()))
+        for image in self._snaps:
+            video.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        video.release()
+        self._snaps = []
+    def del_snap(self):
+        self._snaps = []
 
 # --------------------------------------------------------------------------------
 # RLBench Environment & Related Functions
@@ -298,7 +389,6 @@ class RLBenchEnv:
             if self.apply_depth:
                 depth = getattr(obs, "{}_depth".format(cam))
                 state_dict["depth"] += [depth]
-
             if self.apply_pc:
                 pc = getattr(obs, "{}_point_cloud".format(cam))
                 state_dict["pc"] += [pc]
@@ -590,7 +680,7 @@ def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
     for i in range(num_cams):
         rgb = torch.tensor(obs_dict["rgb"][i]).float().permute(2, 0, 1)
         depth = (
-            torch.tensor(obs_dict["depth"][i]).float().permute(2, 0, 1)
+            torch.tensor(obs_dict["depth"][i]).unsqueeze(2).float().permute(2, 0, 1)
             if apply_depth
             else None
         )
@@ -601,9 +691,9 @@ def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
         if augmentation:
             raise NotImplementedError()  # Deprecated
 
-        # normalise to [-1, 1]
-        rgb = rgb / 255.0
-        rgb = 2 * (rgb - 0.5)
+        # # normalise to [-1, 1]
+        # rgb = rgb / 255.0
+        # rgb = 2 * (rgb - 0.5)
 
         obs_rgb += [rgb.float()]
         if depth is not None:
@@ -613,14 +703,11 @@ def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
     obs = obs_rgb + obs_depth + obs_pc
     return torch.cat(obs, dim=0)
 
-
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-
 def norm_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return tensor / torch.linalg.norm(tensor, ord=2, dim=-1, keepdim=True)
-
 
 def compute_rotation_metrics(
     pred: torch.Tensor,
@@ -634,7 +721,6 @@ def compute_rotation_metrics(
     if reduction == "mean":
         acc = acc.mean()
     return {"rotation": acc}
-
 
 def compute_rotation_loss(logit: torch.Tensor, rot: torch.Tensor):
     dtype = logit.dtype
@@ -652,7 +738,6 @@ def compute_rotation_loss(logit: torch.Tensor, rot: torch.Tensor):
     sym_loss = 4 * (select_mask * loss + (1 - select_mask) * loss_)
 
     return {"rotation": sym_loss.mean()}
-
 
 def load_instructions(instructions: Optional[Path], tasks: Optional[Sequence[str]] = None, variations: Optional[Sequence[int]] = None) -> Optional[Instructions]:
     if instructions is not None:
@@ -682,10 +767,7 @@ class LossAndMetrics:
     def __init__(
         self,args
     ):
-        self.tasks = args.train_tasks
-        # task_file = Path(__file__).parent / "tasks.csv"
-        # with open(task_file) as fid:
-        #     self.tasks = [t.strip() for t in fid.readlines()]
+        self.tasks = list(args.tasks)
 
     def compute_loss(
         self, pred: Dict[str, torch.Tensor], sample: Sample
@@ -714,6 +796,16 @@ class LossAndMetrics:
         outputs = sample["action"].to(device)[padding_mask]
 
         metrics = {}
+        # xyz_acc = {}
+        # xyz_acc["x_acc"] = ((pred["position"][:,0] - outputs[:,0]) ** 2).mean().sqrt()
+        # xyz_acc["y_acc"] = ((pred["position"][:,1] - outputs[:,1]) ** 2).mean().sqrt()
+        # xyz_acc["z_acc"] = ((pred["position"][:,2] - outputs[:,2]) ** 2).mean().sqrt()
+        # print("pred_0_x: ", pred["position"][0,0], " label_0_x: ", outputs[0,0])
+        # print("pred_5_x: ", pred["position"][5,0], " label_5_x: ", outputs[5,0])
+        # print("pred_0_y: ", pred["position"][0,1], " label_0_y: ", outputs[0,1])
+        # print("pred_5_y: ", pred["position"][5,1], " label_5_y: ", outputs[5,1])
+        # print("pred_0_z: ", pred["position"][0,2], " label_0_z: ", outputs[0,2])
+        # print("pred_5_z: ", pred["position"][5,2], " label_5_z: ", outputs[5,2])
 
         acc = ((pred["position"] - outputs[:, :3]) ** 2).sum(1).sqrt() < 0.01
         metrics["position"] = acc.to(dtype).mean()
