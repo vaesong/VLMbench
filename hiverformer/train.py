@@ -24,8 +24,6 @@ from hiverformer.utils import (
     count_parameters,
 )
 from vlm.scripts.VLDataloader_renjie import VLM_dataset
-# from dataset import RLBenchDataset, Sample
-# distributed
 import torch.multiprocessing as mp
 import torch.distributed as dist
 
@@ -53,10 +51,10 @@ class Arguments(tap.Tap):
     variations: Tuple[int, ...] = (0,)
 
     # Train
-    batch_size: int = 16 # 25
+    batch_size: int = 25 # 25
     lr: float = 0.001
     val_freq: int = 200     # 200
-    val_batch_size: int = 16
+    val_batch_size: int = 25
     jitter: bool = False
     
     # 自己加的
@@ -120,7 +118,7 @@ def training(
     device = next(model.parameters()).device
 
     print('---------------------------------------------start------------------------------------------------------')
-    with trange(args.epochs, ncols=85) as tbar:
+    with trange(args.epochs, ncols=160) as tbar:
         for step_id in tbar:
             try:
                 sample = next(iter_loader)
@@ -173,6 +171,7 @@ def training(
                         model,
                         writer,
                         loss_and_metrics,
+                        args,
                     )
                     model.train()
                 else:
@@ -227,7 +226,7 @@ class CheckpointCallback:
 @torch.no_grad()
 def validation_step(
     step_id: int,
-    val_loaders: List[DataLoader],
+    val_loaders: DataLoader,
     model,
     writer,
     loss_and_metrics,
@@ -238,57 +237,59 @@ def validation_step(
     device = next(model.parameters()).device 
     model.eval()
 
-    for val_id, val_loader in enumerate(val_loaders):
-        for i, sample in enumerate(val_loader):
-            if i == val_iters:
-                break
+    for val_id, sample in enumerate(val_loaders):
+        if val_id == val_iters:
+            break
 
-            rgbs = sample["rgbs"].to(device)
-            pcds = sample["pcds"].to(device)
-            gripper = sample["gripper"].to(device)
-            outputs = sample["action"].to(device)
-            padding_mask = sample["padding_mask"].to(device)
-            instr = sample["language"]
-            lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 768
+        rgbs = sample["rgbs"].to(device)
+        pcds = sample["pcds"].to(device)
+        gripper = sample["gripper"].to(device)
+        outputs = sample["action"].to(device)
+        padding_mask = sample["padding_mask"].to(device)
+        instr = sample["language"]
+        lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 768
 
-            pred = model(
-                rgbs,
-                pcds,
-                padding_mask,
-                lang_feat,
-                gripper,
-            )
+        instr = sample["language"] # B 53 512
+        lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
 
-            losses: Dict[str, torch.Tensor] = loss_and_metrics.compute_loss(pred, sample)
-            losses["total"] = torch.stack(list(losses.values())).sum()
+        pred = model(
+            rgbs,
+            pcds,
+            padding_mask,
+            lang_feat,
+            gripper,
+        )
 
-            for n, l in losses.items():
-                key = f"val-loss/{n}"
-                writer.add_scalar(key, l, step_id + i)
-                if key not in values:
-                    values[key] = torch.Tensor([]).to(device)
-                values[key] = torch.cat([values[key], l.unsqueeze(0)])
+        losses: Dict[str, torch.Tensor] = loss_and_metrics.compute_loss(pred, sample)
+        losses["total"] = torch.stack(list(losses.values())).sum()
 
-            writer.add_scalar(f"lr/", args.lr, step_id + i)
+        for n, l in losses.items():
+            key = f"val-loss/{n}"
+            writer.add_scalar(key, l, step_id + val_id)
+            if key not in values:
+                values[key] = torch.Tensor([]).to(device)
+            values[key] = torch.cat([values[key], l.unsqueeze(0)])
 
-            metrics = loss_and_metrics.compute_metrics(pred, sample)
-            for n, l in metrics.items():
-                key = f"val-metrics/{n}"
-                writer.add_scalar(key, l, step_id + i)
-                if key not in metrics:
-                    values[key] = torch.Tensor([]).to(device)
-                values[key] = torch.cat([values[key], l.unsqueeze(0)])
+        writer.add_scalar(f"lr/", args.lr, step_id + val_id)
 
-        key = f"val-loss/total"
-        print(f"Validation Loss {val_id}: {values[key].mean():.05f}")
-        key = f"val-metrics/position"
-        print(f"Validation Position {val_id}: {values[key].mean():.05f}")
+        metrics = loss_and_metrics.compute_metrics(pred, sample)
+        for n, l in metrics.items():
+            key = f"val-metrics/{n}"
+            writer.add_scalar(key, l, step_id + val_id)
+            if key not in metrics:
+                values[key] = torch.Tensor([]).to(device)
+            values[key] = torch.cat([values[key], l.unsqueeze(0)])
+
+    key = f"val-loss/total"
+    print(f"Validation Loss {val_id}: {values[key].mean():.05f}")
+    key = f"val-metrics/position"
+    print(f"Validation Position {val_id}: {values[key].mean():.05f}")
 
     return values
 
 def get_taskvar(tasks: Tuple[str, ...], root: Path):
     # 确定训练的任务
-    if 'all' in list(args.tasks):
+    if 'all' in list(tasks):
         train_tasks =  [
             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
             'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
@@ -300,7 +301,7 @@ def get_taskvar(tasks: Tuple[str, ...], root: Path):
             'open_door_complex'
             ]
     else:
-        train_tasks = list(args.tasks)
+        train_tasks = list(tasks)
 
     task_var = []
 
@@ -394,6 +395,7 @@ def main(gpu, ngpus_per_node, args):
     model.train()
     # 加载模型
     if args.checkpoint is not None:
+        print("Load from checkpoint ........")
         model_dict = torch.load(args.checkpoint, map_location="cpu")
         if args.distributed:
             model.module.load_state_dict(model_dict["weight"])

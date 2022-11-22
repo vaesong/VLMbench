@@ -692,8 +692,8 @@ def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
             raise NotImplementedError()  # Deprecated
 
         # # normalise to [-1, 1]
-        # rgb = rgb / 255.0
-        # rgb = 2 * (rgb - 0.5)
+        rgb = rgb / 255.0
+        rgb = 2 * (rgb - 0.5)
 
         obs_rgb += [rgb.float()]
         if depth is not None:

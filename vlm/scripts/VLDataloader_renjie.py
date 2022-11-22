@@ -1,3 +1,6 @@
+"""
+定义的 VLMbench 的 dataset, 返回 hiverformer 所需要的数据
+"""
 import os
 import numpy as np
 from torch.utils.data import Dataset
@@ -116,6 +119,7 @@ class VLM_dataset(Dataset):
                     self.episode_list.append(path.parent) #PosixPath('open_drawer/variation2/episodes/episode0')
                     self.task_list[task_name]['success'].append(path.parent)
             self.variation_list = list(self.variation_list)
+            
             with open(tasks_list_path,'wb') as f:
                 pickle.dump({'task_list': self.task_list, 
                             'episode_list': self.episode_list,
@@ -170,7 +174,7 @@ class VLM_dataset(Dataset):
                     previous_waypoint = obs.current_waypoint_name
                     self.all_waypoints.append(previous_waypoint)
                     obs_select_inds.append(i)
-                    lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
+                    # lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
         if self.preprocess:
             preprocess_data_folder = self.dataset_path/episode/'preprocess_data'
 

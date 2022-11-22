@@ -747,6 +747,14 @@ class Hiveformer(nn.Module):
         padding_mask,
         instruction: torch.Tensor,
     ) -> Output:
+        """
+        N: 视角数量
+        pc_obs: 点云的obs
+        x: 通过unet网络之后, 融合了所有的信息
+        enc_feat: 通过编码之后的特征，纯图像的特征
+        padding_maks: 补全的mask
+        instruction: 文本的特征
+        """
         pc_obs = pc_obs[padding_mask]   # torch.Size([65, 3, 3, 128, 128])
         # decoding features for translation
         enc_feat.reverse()
@@ -795,8 +803,10 @@ class Hiveformer(nn.Module):
         z_pos = einops.repeat(z_pos, "t (n d) -> b t n d", b=B, n=num_tasks, d=3)
         z_pos = z_pos[padding_mask]
 
-        z_offset = torch.bmm(z_instr, z_pos).squeeze(1)
-        position += z_offset
+        # z_offset = torch.bmm(z_instr, z_pos).squeeze(1)
+        # position += z_offset
+        # print("z_pos:"+z_pos)
+        # print("z_offset:"+str(z_offset))
 
         return {
             "position": position,                              # torch.Size([123, 3])

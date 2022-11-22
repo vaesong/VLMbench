@@ -1,3 +1,6 @@
+"""
+用采的 VLMbench 的数据，通过 hiverformer 模型进行训练
+"""
 import random
 from typing import List, Tuple, Dict, Optional, Any, Union
 import itertools
@@ -28,8 +31,6 @@ from hiverformer.utils import (
     Actioner,
 )
 from vlm.scripts.VLDataloader_renjie import VLM_dataset
-# from dataset import RLBenchDataset, Sample
-# distributed
 import torch.multiprocessing as mp
 import torch.distributed as dist
 
@@ -38,13 +39,13 @@ class Arguments(tap.Tap):
     accumulate_grad_batches: int = 1
     cameras: list = ['left_shoulder','right_shoulder','wrist']
     checkpoint: Optional[Path] = None
-    checkpoint_period: int = 100
+    checkpoint_period: int = 200
     
     xp: Path = "/home/liuchang/projects/VLMbench/VLMbench/xp"
     valset: Optional[Tuple[Path, ...]] = None
     name: str = "hiveformer"
     arch: str = "mct"
-    num_workers: int = 5
+
     max_tries: int = 10
     max_episodes_per_taskvar: int = 100
     instructions: Optional[Path] = None
@@ -59,13 +60,13 @@ class Arguments(tap.Tap):
     # Train
     batch_size: int = 24
     lr: float = 0.001
-    val_freq: int = 100     # 200
+    val_freq: int = 200     # 200
     val_batch_size: int = 16
     jitter: bool = False
     
     # 自己加的
-    train_dir: Path = None
-    valid_dir: Path = None
+    train_dir: Path = "/home/liuchang/DATA/rlbench_data"
+    valid_dir: Path = "/home/liuchang/DATA/rlbench_data"
     epochs: int = 10000
     relative: bool = False
     renew_obs: bool = False
@@ -106,7 +107,7 @@ class Arguments(tap.Tap):
     num_layers: int = 1
     num_words: int = 75
     num_tasks: int = 24
-    mode: str = 'waypoint'
+    mode: str = 'keyframe'
 
 
 def training(
@@ -293,13 +294,7 @@ def validation_step(
         for i, sample in enumerate(val_loaders):
 
             rgbs = sample["rgbs"].float().to(device)
-            # rgbs = rgbs.permute(0,1,2,5,3,4)
-
-            # attens = sample["attns"].float().to(device)
-            # rgbs = torch.cat([rgbs, attens], 3)
-
             pcds = sample["pcds"].float().to(device)
-            # pcds = pcds.permute(0,1,2,5,3,4)
 
             gripper = sample["gripper"].float().to(device)
             outputs = sample["action"].float().to(device)
@@ -339,101 +334,6 @@ def validation_step(
         print(f"Validation Position {val_id}: {values[key].mean():.05f}")
 
     return values
-
-def get_train_loader(args: Arguments) -> DataLoader:
-    dataset = VLM_dataset(
-            args.train_dir, 
-            'train', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
-    )
-
-    if args.distributed:
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-    else:
-        sampler = None
-
-    loader = torch.utils.data.DataLoader(  
-            dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=sampler, 
-            drop_last=True,
-            persistent_workers=True) #,persistent_workers=True
-    
-    return loader, sampler
-
-
-def get_val_loaders(args: Arguments) -> Optional[List[DataLoader]]:
-    
-    dataset = VLM_dataset(
-            args.valid_dir,
-            'valid', 
-            img_size=args.img_size,
-            unused_camera_list = args.unused_camera_list, 
-            preprocess = args.preprocess, 
-            use_fail_cases = args.use_fail_cases, 
-            sample_numbers = args.sample_numbers, 
-            train_tasks=args.train_tasks,
-            args=args
-    )
-
-    if args.distributed:
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-    else:
-        sampler = None
-
-    loader = torch.utils.data.DataLoader(  
-            dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=sampler, 
-            drop_last=True,
-            persistent_workers=True) #,persistent_workers=True
-    
-    return loader
-
-
-def get_model(args: Arguments) -> Tuple[optim.Optimizer, Hiveformer]:
-    device = torch.device('cuda', args.gpu)
-
-    max_episode_length = 200
-    model = Hiveformer(
-        depth=args.depth,
-        dim_feedforward=args.dim_feedforward,
-        hidden_dim=args.hidden_dim,
-        instr_size=args.instr_size,
-        mask_obs_prob=args.mask_obs_prob,
-        max_episode_length=max_episode_length,
-        num_words=args.num_words,
-        num_layers=args.num_layers,
-    )
-    # depth: int = 4
-    # dim_feedforward: int = 64
-    # hidden_dim: int = 64
-    # instr_size: int = 768
-    # mask_obs_prob: float = 0.0
-    # num_layers: int = 1
-    # num_words: int = 80
-    model=model.to(device)
-
-    optimizer = torch.optim.Adam(model.parameters(),args.lr)
-
-    print("Number of parameters:")
-    model_params = count_parameters(model)
-    print("- model", model_params)
-    print("Total", model_params)
-
-    return optimizer, model
 
 def main(gpu, ngpus_per_node, args):
 
@@ -564,7 +464,7 @@ def main(gpu, ngpus_per_node, args):
     # 构建训练集和 train_loader
     train_dataset = VLM_dataset(
             args.train_dir, 
-            'train', 
+            'train_single_variation', 
             img_size=args.img_size,
             unused_camera_list = args.unused_camera_list, 
             preprocess = args.preprocess, 
@@ -592,7 +492,7 @@ def main(gpu, ngpus_per_node, args):
     # 构建验证集和 val_loader
     val_dataset = VLM_dataset(
             args.valid_dir,
-            'valid', 
+            'valid_single_variation',
             img_size=args.img_size,
             unused_camera_list = args.unused_camera_list, 
             preprocess = args.preprocess, 
@@ -607,16 +507,17 @@ def main(gpu, ngpus_per_node, args):
     else:
         val_sampler = None
 
-    val_loader = torch.utils.data.DataLoader(  
-            val_dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(val_sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=val_sampler, 
-            drop_last=True,
-            persistent_workers=args.persistent_workers) #,persistent_workers=True
+    # val_loader = torch.utils.data.DataLoader(  
+    #         val_dataset, 
+    #         batch_size=args.batch_size, 
+    #         shuffle=(val_sampler is None),
+    #         num_workers=args.workers, 
+    #         pin_memory=True, 
+    #         sampler=val_sampler, 
+    #         drop_last=True,
+    #         persistent_workers=args.persistent_workers) #,persistent_workers=True
     
+    val_loader = None
     # 开始训练
     training(
         model,
@@ -645,106 +546,3 @@ if __name__ == "__main__":
         mp.spawn(main, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
         main(args.gpu, ngpus_per_node, args)
-
-
-
-    # log_dir = get_log_dir(args)
-    # log_dir.mkdir(exist_ok=True, parents=True)
-    # print("Logging:", log_dir)
-    # args.save(str(log_dir / "hparams.json"))
-    # writer = SummaryWriter(log_dir=log_dir)
-
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
-    # random.seed(args.seed)
-
-    # if 'all' in list(args.tasks):
-    #     args.train_tasks =  [
-    #         'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
-    #         'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
-    #         'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
-    #         'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-    #         'stack_cubes_color', 'stack_cubes_size',
-    #         'stack_cubes_relative', 'stack_cubes_shape',
-    #         'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-    #         'open_drawer',
-    #         'open_door_complex'
-    #         ]
-    # else:
-    #     args.train_tasks = list(args.tasks)
-
-    # device = torch.device('cuda', args.gpu)
-
-    # optimizer, model = get_model(args)
-    
-    # loss_and_metrics = LossAndMetrics(args)
-
-    # # training episode
-    # model_dict = {
-    #     "weight": model.state_dict(),
-    #     "optimizer": optimizer.state_dict(),
-    # }
-    # checkpointer = CheckpointCallback(
-    #     "val-metrics/position",
-    #     log_dir,
-    #     model_dict,
-    #     minimizing=False,
-    #     checkpoint_period=args.checkpoint_period,
-    # )
-
-    # model.train()
-    # print(model)
-    # val_loader = get_val_loaders(args)
-    # # val_loaders = None
-
-    # train_loader, train_sampler = get_train_loader(args)
-    # training(
-    #     model,
-    #     optimizer,
-    #     train_loader,
-    #     train_sampler,
-    #     val_loader,
-    #     checkpointer,
-    #     loss_and_metrics,
-    #     args,
-    #     writer,
-    # )
-
-    # # last checkpoint
-    # checkpoint = log_dir / f"mtl_{args.seed}_{args.lr}.pth"
-    # torch.save(model_dict, checkpoint)
-
-    # evaluation
-    # model.eval()
-
-    # env = RLBenchEnv(
-    #     data_path="",
-    #     apply_rgb=True,
-    #     apply_pc=True,
-    #     apply_cameras=("left_shoulder", "right_shoulder", "wrist"),
-    #     headless=args.headless,
-    # )
-
-    # instruction = load_instructions(args.instructions)
-    # actioner = Actioner(model=model.model, instructions=instruction)
-    # max_eps_dict = load_episodes()["max_episode_length"]
-    # for task_str in args.tasks:
-    #     for variation in args.variations:
-    #         success_rate = env.evaluate(
-    #             task_str,
-    #             actioner=actioner,
-    #             max_episodes=max_eps_dict.get(task_str, 6),
-    #             variation=variation,
-    #             num_demos=500,
-    #             demos=None,
-    #             log_dir=log_dir,
-    #             max_tries=args.max_tries,
-    #         )
-
-    #         print("Testing Success Rate {}: {:.04f}".format(task_str, success_rate))
-
-    #         with FileLock(args.output.parent / f"{args.output.name}.lock"):
-    #             with open(args.output, "a") as oid:
-    #                 oid.write(
-    #                     f"{task_str}-{variation}, na, seed={args.seed}, {success_rate}\n"
-    #                 )

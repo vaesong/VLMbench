@@ -24,7 +24,7 @@ class StackCubes(Task):
         self.temporary_waypoints = []
         self.taks_base = self.get_base()
         if not hasattr(self, "model_num"):
-            self.model_num = 4
+            self.model_num = 2 # 物品的数量
         if not hasattr(self, "class_num"):
             self.class_num = 1
 

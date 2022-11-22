@@ -45,7 +45,7 @@ class Arguments(tap.Tap):
     seed: int = 2
 
     # tasks: Tuple[str, ...]
-    tasks: Tuple[str, ...] = ('place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative')
+    tasks: Tuple[str, ...] = ('stack_cubes_color')
     train_tasks: List = []
     variations: Tuple[int, ...] = (0,)
     
@@ -55,7 +55,7 @@ class Arguments(tap.Tap):
     relative: bool = False
     renew_obs: bool = False
     add_low_lang: bool = True
-    output: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/valid"
+    output: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/single_valid"
 
     img_size: list = [128, 128]
     unused_camera_list: list = ['overhead','front']
@@ -240,7 +240,7 @@ class Hive_dataset(Dataset):
                     previous_waypoint = obs.current_waypoint_name
                     self.all_waypoints.append(previous_waypoint)
                     obs_select_inds.append(i)
-                    lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
+                    # lang+=str(f" Step {num2words(obs_select_inds.index(i))}:"+obs.low_level_description)
 
         # episode_number = int(episode.name.replace('episode',''))
         episode_name = episode.name
@@ -459,8 +459,8 @@ if __name__ == "__main__":
         args.train_tasks = list(args.tasks)
 
     dataset = Hive_dataset(
-            args.valid_dir, 
-            'valid', 
+            args.train_dir, 
+            'valid_single_variation',
             img_size=args.img_size,
             unused_camera_list = args.unused_camera_list, 
             preprocess = args.preprocess, 

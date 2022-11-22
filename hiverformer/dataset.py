@@ -231,6 +231,8 @@ class My_Dataset(data.Dataset):
             self._data_dirs.append(data_dir)
             self._episodes += episodes
             self._num_episodes += num_episodes
+            if num_episodes >= 80:
+                break
 
         print("Num ep.", self._num_episodes)
 

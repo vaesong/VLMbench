@@ -5,7 +5,6 @@ from distutils.util import strtobool
 from pathlib import Path
 
 import cv2
-import model_PREVALENT
 import numpy as np
 import torch
 import torch.nn as nn
@@ -170,106 +169,6 @@ class CliportAgent(object):
         self.prev_pose = action[:7]
         return action, waypoint_type
 
-class RecurrentBertAgent():
-    def __init__(self,args=None) -> None:
-        self.tok = BertTokenizer.from_pretrained('/home/liuchang/projects/VLMbench/VLMbench/vlm/scripts/base-no-labels/ep_67_588997')
-        # self.vln_bert= model_PREVALENT.VLNBERT().cuda()
-        self.args = args
-        if args.load is not None:
-            vln_bert = model_PREVALENT.VLNBERT().cuda()
-            # critic = model_PREVALENT.Critic().cuda()
-            optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
-            start_iter,vln_bert,optimizer = load(os.path.join(args.load),vln_bert,optimizer)
-            print("\nLOAD the model from {}, iteration {} ".format(args.load, start_iter))
-            self.vln_bert=vln_bert.cuda()
-        else:
-            self.vln_bert = model_PREVALENT.VLNBERT().cuda()
-            # critic = model_PREVALENT.Critic().cuda()
-            optimizer = torch.optim.Adam(vln_bert.parameters(),args.lr)
-    
-    def act(self,obs,language,action_feat,state,step_list,use_gt_xy=False,use_gt_z=False, use_gt_theta=False, use_gt_roll_pitch=False):
-        '''
-        obs:raw image sequence
-        langauge :raw language
-        action_feat : gripper_pose+gripper_open
-        '''
-        with torch.no_grad():
-            current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step_list
-            lang_tokens = self.tok.tokenize(language)
-            temp_instr_tokens = ['[CLS]'] + lang_tokens + ['[SEP]']
-            instr_tokens = temp_instr_tokens + ['[PAD]'] * (self.args.language_padding-len(temp_instr_tokens))
-            language = self.tok.convert_tokens_to_ids(instr_tokens)
-            # language initial
-            language=torch.tensor(language,dtype=torch.long).unsqueeze(0)
-            language_attention_mask = (language != 0).cuda()
-            token_type_ids = torch.zeros_like(language_attention_mask).long().cuda()                                   
-            language_inputs = {'mode':'language',
-            'sentence':       Variable(language, requires_grad=False).long().cuda(),
-            'attention_mask': language_attention_mask,
-            'lang_mask':         language_attention_mask,  
-            'token_type_ids': token_type_ids}
-            h_t, language_features = self.vln_bert(**language_inputs)
-            if state is not None:
-                language_features = torch.cat((state.unsqueeze(1), language_features[:,1:,:]), dim=1) 
-            else:
-                language_features = torch.cat((h_t.unsqueeze(1), language_features[:,1:,:]), dim=1) 
-
-            z_max = 1.2
-            pixel_size = 5.625e-3
-            if 'door' in self.args.task or 'drawer' in self.args.task:
-                z_max = 1.8
-            bounds = np.array([[-0.05,0.67],[-0.45, 0.45], [0.7, z_max]])
-            
-            cmaps, hmaps = [], []
-            for ob in obs:
-                rgbs = [ob.front_rgb,ob.wrist_rgb,ob.left_shoulder_rgb,ob.right_shoulder_rgb,ob.overhead_rgb]
-                pcds = [ob.front_point_cloud, ob.wrist_point_cloud, ob.left_shoulder_point_cloud, ob.right_shoulder_point_cloud, ob.overhead_point_cloud]
-                cmap, hmap = get_fused_heightmap(rgbs, pcds, bounds, pixel_size)
-                cmaps.append(cmap)
-                hmaps.append(hmap)
-            cmaps = np.stack(cmaps, axis=0)
-            hmaps = np.tile((np.stack(hmaps, axis=0))[..., None], (1,1,1,3))
-            img = np.concatenate([cmaps, hmaps], axis=-1)
-            visual_temp_mask=(length2mask([len(obs)],len(obs)) == 0).long().cuda()
-            visual_attention_mask = torch.cat((language_attention_mask, visual_temp_mask), dim=-1).cuda()
-            img = torch.from_numpy(img).unsqueeze(0).cuda()
-            action_feat=torch.from_numpy(np.array(action_feat)).unsqueeze(0).cuda()
-            visual_inputs = {
-                    'mode':               'visual',
-                    'sentence':           language_features,
-                    'attention_mask':     visual_attention_mask,
-                    'lang_mask':          language_attention_mask,
-                    'vis_mask':           visual_temp_mask,
-                    'token_type_ids':     token_type_ids,
-                    # 'action_feats':       input_a_t,
-                    # 'pano_feats':         f_t,
-                    'img':                img,
-                    "action_feats":       action_feat ,
-                    "test_only":          True       
-            }
-            state_proj,attended_language,attended_visual,lang_output,visn_output,lang_output_pooler,visn_output_poller,action= self.vln_bert(**visual_inputs)
-            action = action[0].cpu().numpy()
-            x_offset=action[0]-gt_pose[0]
-            y_offset=action[1]-gt_pose[1]
-            z_offset=action[2]-gt_pose[2]
-            print("offset:x: {x_offset},: {y_offset},z: {z_offset}".format(x_offset=x_offset,y_offset=y_offset,z_offset=z_offset))
-            if action[-1] < 0.5:
-                action[-1] = 0
-            else:
-                action[-1] = 1
-            if use_gt_xy:
-                action[:2]=gt_pose[:2]
-            if use_gt_z:
-                action[2]=gt_pose[2]
-            if use_gt_theta and use_gt_roll_pitch:
-                rotation = R.from_quat(gt_pose[3:]).as_euler('zyx')
-                action[3:7] = R.from_euler("zyx",rotation).as_quat()            
-            else:
-                rotation=R.from_quat(action[3:7]).as_euler('zyx')
-                action[3:7] = R.from_euler("zyx",rotation).as_quat()
-            action[7] = gripper_control
-        return state_proj,action,waypoint_type
-
 class hiveformerAgent():
     def __init__(self,args=None):
         self.args = args
@@ -349,7 +248,8 @@ def load_test_config(data_folder: Path, task_name):
     episode_list = []
     for path in data_folder.rglob('configs*'):
         t_name = path.parents[3].name
-        if t_name == task_name:
+        v_name = path.parents[2].name
+        if t_name == task_name and v_name == "variation18":
             episode_list.append(path.parent)
     return episode_list
 
@@ -367,7 +267,7 @@ def add_argments():
     #dataset
     parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/test")
     parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/stack_waypoint_version0/model.epoch=1100-value=0.pth", help='path of the trained model')
+    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/stack_waypoint_version1/model.epoch=53400-value=0.pth", help='path of the trained model')
     parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
@@ -381,7 +281,7 @@ def add_argments():
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
     parser.add_argument('--agent', type=str, default="hiveformerAgent", help="test agent")
     parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the test results. Project Name")
@@ -429,7 +329,8 @@ if __name__=="__main__":
     elif args.task == 'pick':
         task_files = ['pick_cube_shape', 'pick_cube_relative', 'pick_cube_color', 'pick_cube_size']
     elif args.task == 'stack':
-        task_files = ['stack_cubes_color', 'stack_cubes_relative', 'stack_cubes_shape', 'stack_cubes_size']
+        # task_files = ['stack_cubes_color', 'stack_cubes_relative', 'stack_cubes_shape', 'stack_cubes_size']
+        task_files = ['stack_cubes_color']
     elif args.task == 'shape_sorter':
         need_pre_move = True
         args.ignore_collision = True
@@ -475,9 +376,7 @@ if __name__=="__main__":
     #     agent = CliportAgent(args.model_name, device_id=args.gpu,z_roll_pitch=True, checkpoint=checkpoint, args=args)
     # else:
     #     agent = ReplayAgent()
-    if args.agent == "RecurrentBertAgent":
-        agent = RecurrentBertAgent(args)
-    elif args.agent == "CliportAgent":
+    if args.agent == "CliportAgent":
         checkpoint = args.checkpoints
         agent = CliportAgent(args.model_name, device_id=args.gpu,z_roll_pitch=True, checkpoint=checkpoint, args=args)
     elif args.agent =="hiveformerAgent":
@@ -542,26 +441,28 @@ if __name__=="__main__":
             use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch = False ,False,True,True
             grasped = False
             for i in range(len(step_list)):
+                print(i)
                 # x_loss,y_loss,z_loss=0,0,0
                 step = step_list[i]
                 if i == 0 and args.agent =="hiveformerAgent":
                     agent.clear()     
-                if args.agent == "RecurrentBertAgent":
-                    state,action,waypoint_type = agent.act(history_img,high_descriptions,history_action,state,step,use_gt_xy,use_gt_z,use_gt_theta, use_gt_roll_pitch)
-                elif args.agent =="hiveformerAgent":
-                    action = agent.act(history_img,high_descriptions,history_action,step,i)         
+                action = agent.act(history_img,high_descriptions,history_action,step,i)         
+                print("action:")
+                print(action)
                 current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
+                print("gt_pose:")
+                print(gt_pose)
                 collision_checking = False if waypoint_type == "grasp" else True
                 
-                x_loss=np.abs(action[0]-gt_pose[0])
-                y_loss=np.abs(action[1]-gt_pose[1])
-                z_loss=np.abs(action[2]-gt_pose[2])
-                if args.goal_conditioned or i == 0 :
+                x_loss=(action[0]-gt_pose[0])
+                y_loss=(action[1]-gt_pose[1])
+                z_loss=(action[2]-gt_pose[2])
+                if args.goal_conditioned:
                     action[:7] = gt_pose
                     action[7] = gripper_control
+                action[3:7]=gt_pose[3:7]
                 # if i == len(step_list)-1:
                 #     action[7] = 1
-
                 file.write(f"{task.get_name()}:x_loss: {x_loss}, y_loss: {y_loss}, z_loss {z_loss} %!\n")
                 try:
                     obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, need_grasp_obj = target_grasp_obj_name)

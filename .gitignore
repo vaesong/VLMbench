@@ -141,3 +141,5 @@ weights/
 /xp
 hiverformer/packaged
 hiverformer/valid
+hiverformer/single_valid
+hiverformer/single_variation
