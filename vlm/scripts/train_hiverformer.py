@@ -127,8 +127,6 @@ def training(
     timer = {"batch_time":AverageMeter('Time', ':6.3f')}
     print('---------------------------------------------start------------------------------------------------------')
     for epoch in range(0, args.epochs+1):
-        # 在分布式模式下，需要在每个 epoch 开始时调用set_epoch()方法，然后再创建 DataLoader 迭代器，以使shuffle 操作能够在多个 epoch 中正常工作。 
-        # 否则，dataloader迭代器产生的数据将始终使用相同的顺序，使得每个epoch在每个GPU上分割的数据集都是一样的
         if args.distributed:
                 train_sampler.set_epoch(epoch)
 
@@ -143,23 +141,13 @@ def training(
             sample = batch_data
             
             rgbs = sample["rgbs"].float().to(device) # B 4key_frame 3camera 4channel(rgb+attn) 128 128 except for the end index img
-            # rgbs = rgbs.permute(0,1,2,5,3,4)
-
-            # attens = sample["attns"].float().to(device)
-            # rgbs = torch.cat([rgbs, attens], 3)
-
             pcds = sample["pcds"].float().to(device) # B 4key_frame 3camera 3channel 128 128 except for the end index pcd
-            # pcds = pcds.permute(0,1,2,5,3,4)
 
             gripper = sample["gripper"].float().to(device) # B 4key_frame 8(action_ls[:-1]) except for the end index action
-            # outputs = sample["action"].to(device) # B 4key_frame 8(action_ls[1:]) except for the start index action 
             padding_mask = sample["padding_mask"].to(device)
 
-            instr = sample["language"] # B 53 512
+            instr = sample["language"] # B 75 512
             lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
-
-            # frame_id = sample["frame_id"] # [0,1,2,3]
-            # tasks = sample["task"] 
 
             if batch_step % args.accumulate_grad_batches == 0:
                 optimizer.zero_grad()
@@ -382,7 +370,7 @@ def main(gpu, ngpus_per_node, args):
         writer = None
 
     # 构建模型和优化器
-    max_episode_length = 200
+    max_episode_length = 20
     model = Hiveformer(
         depth=args.depth,
         dim_feedforward=args.dim_feedforward,
@@ -394,13 +382,7 @@ def main(gpu, ngpus_per_node, args):
         num_layers=args.num_layers,
         num_tasks=args.num_tasks,
     )
-    # depth: int = 4
-    # dim_feedforward: int = 64
-    # hidden_dim: int = 64
-    # instr_size: int = 768
-    # mask_obs_prob: float = 0.0
-    # num_layers: int = 1
-    # num_words: int = 80
+
     if args.distributed:
         if args.gpu is not None:
             torch.cuda.set_device(args.gpu)
@@ -411,8 +393,8 @@ def main(gpu, ngpus_per_node, args):
             model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
     else:
         model.cuda(args.gpu)
+
     # 优化器
-    # optimizer = torch.optim.Adam(model.parameters(),args.lr)
     optimizer_grouped_parameters = [
         {"params": [], "weight_decay": 0.0, "lr": args.lr},
         {"params": [], "weight_decay": 5e-4, "lr": args.lr},
@@ -420,9 +402,9 @@ def main(gpu, ngpus_per_node, args):
     no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
     for name, param in model.named_parameters():
         if any(nd in name for nd in no_decay):
-            optimizer_grouped_parameters[0]["params"].append(param)  # type: ignore
+            optimizer_grouped_parameters[0]["params"].append(param)
         else:
-            optimizer_grouped_parameters[1]["params"].append(param)  # type: ignore
+            optimizer_grouped_parameters[1]["params"].append(param)
     optimizer: optim.Optimizer = optim.AdamW(optimizer_grouped_parameters)
     
     model.train()

@@ -349,7 +349,7 @@ def main(gpu, ngpus_per_node, args):
         writer = None
 
     # 构建模型和优化器
-    max_episode_length = 200
+    max_episode_length = 20
     model = Hiveformer(
         depth=args.depth,
         dim_feedforward=args.dim_feedforward,
@@ -361,13 +361,6 @@ def main(gpu, ngpus_per_node, args):
         num_layers=args.num_layers,
         num_tasks=args.num_tasks,
     )
-    # depth: int = 4
-    # dim_feedforward: int = 64
-    # hidden_dim: int = 64
-    # instr_size: int = 768
-    # mask_obs_prob: float = 0.0
-    # num_layers: int = 1
-    # num_words: int = 80
     if args.distributed:
         if args.gpu is not None:
             torch.cuda.set_device(args.gpu)
@@ -505,106 +498,3 @@ if __name__ == "__main__":
         mp.spawn(main, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
         main(args.gpu, ngpus_per_node, args)
-
-
-
-    # log_dir = get_log_dir(args)
-    # log_dir.mkdir(exist_ok=True, parents=True)
-    # print("Logging:", log_dir)
-    # args.save(str(log_dir / "hparams.json"))
-    # writer = SummaryWriter(log_dir=log_dir)
-
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
-    # random.seed(args.seed)
-
-    # if 'all' in list(args.tasks):
-    #     args.train_tasks =  [
-    #         'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
-    #         'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
-    #         'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
-    #         'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-    #         'stack_cubes_color', 'stack_cubes_size',
-    #         'stack_cubes_relative', 'stack_cubes_shape',
-    #         'place_into_shape_sorter_color', 'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-    #         'open_drawer',
-    #         'open_door_complex'
-    #         ]
-    # else:
-    #     args.train_tasks = list(args.tasks)
-
-    # device = torch.device('cuda', args.gpu)
-
-    # optimizer, model = get_model(args)
-    
-    # loss_and_metrics = LossAndMetrics(args)
-
-    # # training episode
-    # model_dict = {
-    #     "weight": model.state_dict(),
-    #     "optimizer": optimizer.state_dict(),
-    # }
-    # checkpointer = CheckpointCallback(
-    #     "val-metrics/position",
-    #     log_dir,
-    #     model_dict,
-    #     minimizing=False,
-    #     checkpoint_period=args.checkpoint_period,
-    # )
-
-    # model.train()
-    # print(model)
-    # val_loader = get_val_loaders(args)
-    # # val_loaders = None
-
-    # train_loader, train_sampler = get_train_loader(args)
-    # training(
-    #     model,
-    #     optimizer,
-    #     train_loader,
-    #     train_sampler,
-    #     val_loader,
-    #     checkpointer,
-    #     loss_and_metrics,
-    #     args,
-    #     writer,
-    # )
-
-    # # last checkpoint
-    # checkpoint = log_dir / f"mtl_{args.seed}_{args.lr}.pth"
-    # torch.save(model_dict, checkpoint)
-
-    # evaluation
-    # model.eval()
-
-    # env = RLBenchEnv(
-    #     data_path="",
-    #     apply_rgb=True,
-    #     apply_pc=True,
-    #     apply_cameras=("left_shoulder", "right_shoulder", "wrist"),
-    #     headless=args.headless,
-    # )
-
-    # instruction = load_instructions(args.instructions)
-    # actioner = Actioner(model=model.model, instructions=instruction)
-    # max_eps_dict = load_episodes()["max_episode_length"]
-    # for task_str in args.tasks:
-    #     for variation in args.variations:
-    #         success_rate = env.evaluate(
-    #             task_str,
-    #             actioner=actioner,
-    #             max_episodes=max_eps_dict.get(task_str, 6),
-    #             variation=variation,
-    #             num_demos=500,
-    #             demos=None,
-    #             log_dir=log_dir,
-    #             max_tries=args.max_tries,
-    #         )
-
-    #         print("Testing Success Rate {}: {:.04f}".format(task_str, success_rate))
-
-    #         with FileLock(args.output.parent / f"{args.output.name}.lock"):
-    #             with open(args.output, "a") as oid:
-    #                 oid.write(
-    #                     f"{task_str}-{variation}, na, seed={args.seed}, {success_rate}\n"
-    #                 )
