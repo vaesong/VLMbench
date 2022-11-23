@@ -39,20 +39,21 @@ set_seed(random_seed)
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    './rlbench_data/test/seen',
+                    '/home/liuchang/DATA/rlbench_data/single_test/seen',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks', [
-                            'place_into_shape_sorter_color',
-                            'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
-                            'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
-                            'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
-                            'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
-                            'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
-                            'stack_cubes_color', 'stack_cubes_size',
-                            'stack_cubes_relative', 'stack_cubes_shape',
-                            'open_door_complex',
-                            'open_drawer'
-],
+flags.DEFINE_list('tasks', ['stack_cubes_color'],
+# [
+#                             'place_into_shape_sorter_color',
+#                             'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
+#                             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
+#                             'wipe_table_color', 'wipe_table_relative', 'wipe_table_shape', 'wipe_table_size', 'wipe_table_direction',
+#                             'pour_demo_color', 'pour_demo_relative', 'pour_demo_size',
+#                             'pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size',
+#                             'stack_cubes_color', 'stack_cubes_size',
+#                             'stack_cubes_relative', 'stack_cubes_shape',
+#                             'open_door_complex',
+#                             'open_drawer'
+# ],
                   'The tasks to collect. If empty, all tasks are collected.')
 flags.DEFINE_list('image_size', [360, 360],
                   'The size of the images tp save.')
@@ -61,11 +62,11 @@ flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'but is faster.')
 flags.DEFINE_integer('processes', 16,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 5,
+flags.DEFINE_integer('episodes_per_task', 30,
                      'The number of episodes to collect per task.')
-flags.DEFINE_integer('episodes_per_task_all_variations', 100,
+flags.DEFINE_integer('episodes_per_task_all_variations', 0,
                      'The number of episodes to collect per task.')
-flags.DEFINE_integer('variations', -1,
+flags.DEFINE_integer('variations', 1,
                      'Number of variations to collect per task. -1 for all.')
 
 class Recorder(object):

@@ -7,11 +7,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.models as models
-from utils import length2mask
-from cliport.utils.utils import get_fused_heightmap
 from num2words import num2words
 from pyrep.const import RenderMode
 from pyrep.objects.dummy import Dummy
@@ -19,7 +14,7 @@ from pyrep.objects.vision_sensor import VisionSensor
 from pytorch_transformers import BertTokenizer
 from scipy.spatial.transform import Rotation as R
 from torch.autograd import Variable
-from train_vlmbench import load
+# from train_vlmbench import load
 from hiverformer.process_instructions import get_language_feat
 from amsolver.action_modes import ActionMode, ArmActionMode
 from amsolver.backend.utils import task_file_to_task_class
@@ -204,7 +199,7 @@ class hiveformerAgent():
         self.grippers = torch.Tensor([])
     
     def act(self,obs,language,action_feat,step,step_id):
-        current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
+        # current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
         with torch.no_grad():
             ob = obs[-1]
             rgb,pcd,gripper = self.env.get_rgb_pcd_gripper_from_obs(ob)
@@ -249,7 +244,7 @@ def load_test_config(data_folder: Path, task_name):
     for path in data_folder.rglob('configs*'):
         t_name = path.parents[3].name
         v_name = path.parents[2].name
-        if t_name == task_name and v_name == "variation18":
+        if t_name == task_name:
             episode_list.append(path.parent)
     return episode_list
 
@@ -265,9 +260,9 @@ def set_seed(seed, torch=False):
 def add_argments():
     parser = argparse.ArgumentParser(description='')
     #dataset
-    parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/test")
+    parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/single_test")
     parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/stack_waypoint_version1/model.epoch=53400-value=0.pth", help='path of the trained model')
+    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/stack_keyframe_version0/model.epoch=2000-value=0.pth", help='path of the trained model')
     parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
     parser.add_argument('--model_name', type=str, default="cliport_6dof")
     parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
@@ -279,9 +274,9 @@ def add_argments():
     parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=True)
     parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
-    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=True)
+    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=True)
+    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
     parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
     parser.add_argument('--agent', type=str, default="hiveformerAgent", help="test agent")
     parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the test results. Project Name")
@@ -289,8 +284,6 @@ def add_argments():
     return args
 
 if __name__=="__main__":
-    if not os.path.exists('./results_recurrent_bert'):
-        os.makedirs('./results_recurrent_bert')
     args = add_argments()
     if args.wandb_entity is not None:
         import wandb
@@ -440,32 +433,32 @@ if __name__=="__main__":
             hidden_states,rewards,actions = [],[],[]
             use_gt_xy,use_gt_z,use_gt_theta,use_gt_roll_pitch = False ,False,True,True
             grasped = False
-            for i in range(len(step_list)):
+            for i in range(args.maxAction):
                 print(i)
                 # x_loss,y_loss,z_loss=0,0,0
-                step = step_list[i]
+                # step = step_list[i]
                 if i == 0 and args.agent =="hiveformerAgent":
                     agent.clear()     
                 action = agent.act(history_img,high_descriptions,history_action,step,i)         
                 print("action:")
                 print(action)
-                current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
-                print("gt_pose:")
-                print(gt_pose)
-                collision_checking = False if waypoint_type == "grasp" else True
+                # current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
+                # print("gt_pose:")
+                # print(gt_pose)
+                # collision_checking = False if waypoint_type == "grasp" else True
                 
-                x_loss=(action[0]-gt_pose[0])
-                y_loss=(action[1]-gt_pose[1])
-                z_loss=(action[2]-gt_pose[2])
-                if args.goal_conditioned:
-                    action[:7] = gt_pose
-                    action[7] = gripper_control
-                action[3:7]=gt_pose[3:7]
+                # x_loss=(action[0]-gt_pose[0])
+                # y_loss=(action[1]-gt_pose[1])
+                # z_loss=(action[2]-gt_pose[2])
+                # if args.goal_conditioned:
+                #     action[:7] = gt_pose
+                #     action[7] = gripper_control
+                # action[3:7]=gt_pose[3:7]
                 # if i == len(step_list)-1:
                 #     action[7] = 1
-                file.write(f"{task.get_name()}:x_loss: {x_loss}, y_loss: {y_loss}, z_loss {z_loss} %!\n")
+                # file.write(f"{task.get_name()}:x_loss: {x_loss}, y_loss: {y_loss}, z_loss {z_loss} %!\n")
                 try:
-                    obs, reward, terminate = task.step(action, collision_checking, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
+                    obs, reward, terminate = task.step(action, None, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
                     history_img.append(obs)
                     history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
                 except:
@@ -479,8 +472,8 @@ if __name__=="__main__":
                     success_times+=1
                     successed = True
                     break
-            if reward == 1 or grasped == True:
-                recorder.save(f"./records_{args.agent}/{task.get_name()}/{num+1}.avi")
+            # if reward == 1 or grasped == True:
+            recorder.save(f"./records_{args.agent}/{task.get_name()}/{num+1}.avi")
             recorder.del_snap()
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")

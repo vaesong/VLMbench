@@ -5,18 +5,18 @@ from torch.autograd import Variable
 # from env import R2RBatch
 #import utils
 #from utils import padding_idx, print_progress
-import model_PREVALENT
+# import model_PREVALENT
 import os
 from pickle import NONE
 import numpy as np
 import torch
-from vlm.scripts.VLDataloader_custom import VLM_dataset
+# from vlm.scripts.VLDataloader_custom import VLM_dataset
 from pytorch_transformers import (BertConfig)
 import utils
 from tensorboardX import SummaryWriter
 from pytorch_transformers import BertConfig
 from pytorch_transformers.modeling_bert import BertOnlyMLMHead
-from param import args
+# from param import args
 # def collate_fn(batch):
 # #     output_batch = []
 #     lens = [len(dat["img"]) for dat in batch]
@@ -58,8 +58,8 @@ def load(path,vln_bert,optim):
                         print("NOTICE: DIFFERENT KEYS IN THE LISTEREN")
                         state.update(states[name]['state_dict'])
                         model.load_state_dict(state)
-                        if args.loadOptim:
-                                optimizer.load_state_dict(states[name]['optimizer'])
+                        # if args.loadOptim:
+                        #         optimizer.load_state_dict(states[name]['optimizer'])
         all_tuple = [("vln_bert", vln_bert, optim)]
         for param in all_tuple:
                 recover_state(*param)
