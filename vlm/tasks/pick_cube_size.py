@@ -8,6 +8,7 @@ from amsolver.backend.utils import scale_object, select_color
 from vlm.tasks.pick_cube import PickCube
 
 size_permutations = list(itertools.product(["small", "large"], repeat=2))
+# size_permutations = list(itertools.product(["large""large"], repeat=2))
 
 class PickCubeSize(PickCube):
     def init_task(self) -> None:

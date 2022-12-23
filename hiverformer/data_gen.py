@@ -1,4 +1,5 @@
 import os
+import re
 import numpy as np
 from torch.utils.data import Dataset
 from typing import List, Tuple, Dict, Optional, Any, Union
@@ -20,6 +21,7 @@ from pytorch_transformers import  BertTokenizer
 # add hiverformer
 from torch.nn import functional as F
 from hiverformer.utils import obs_to_attn, DataTransform
+from hiverformer.process_instructions import get_language_feat
 import random
 import math
 import itertools
@@ -45,7 +47,7 @@ class Arguments(tap.Tap):
     seed: int = 2
 
     # tasks: Tuple[str, ...]
-    tasks: Tuple[str, ...] = ('stack_cubes_color')
+    tasks: Tuple[str, ...] = ('pick_cube_color', 'pick_cube_relative', 'pick_cube_shape', 'pick_cube_size')
     train_tasks: List = []
     variations: Tuple[int, ...] = (0,)
     
@@ -55,7 +57,8 @@ class Arguments(tap.Tap):
     relative: bool = False
     renew_obs: bool = False
     add_low_lang: bool = True
-    output: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/single_valid"
+    output: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/data_gen"
+    mode: str = 'waypoint'
 
     img_size: list = [128, 128]
     unused_camera_list: list = ['overhead','front']
@@ -64,7 +67,9 @@ class Arguments(tap.Tap):
     sample_numbers: int = 0
     workers: int = 0
     persistent_workers: bool = False
-    gpu: int = 0
+    gpu: int = 5
+
+    num_words: int = 75
 
 def get_attn_indices_from_demo(
     task_str: str, demo: Demo, cameras: Tuple[str, ...], frames: List,
@@ -109,6 +114,7 @@ class Hive_dataset(Dataset):
         self.cameras = args.cameras
         self.use_fail_cases = use_fail_cases
         self.output = args.output
+        self.mode = args.mode
         if train_tasks is None:
             train_tasks =  [
                             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
@@ -178,6 +184,12 @@ class Hive_dataset(Dataset):
             self.variation_list =set()
             for path in self.dataset_path.rglob('low_dim_obs*'):#PosixPath('/home/zp_3c/liuchang/vlmbench/data/train/open_drawer/variation2/episodes/episode0/low_dim_obs.pkl')
                 path = path.relative_to(self.dataset_path)#PosixPath('open_drawer/variation2/episodes/episode0/low_dim_obs.pkl')
+
+                episode = (os.path.split(path.parents[0]))[-1]
+                list_number = re.findall(r"\d+",episode)
+                if int(list_number[0]) < 300:
+                    continue
+
                 task_name = str(path.parents[3]) #open_drawer
                 if task_name not in self.task_list:
                     self.task_list[task_name]={'success':[], 'fail':[]}
@@ -246,7 +258,11 @@ class Hive_dataset(Dataset):
         episode_name = episode.name
         variation_number = int(variation_path.name.replace('variation',''))
 
-        key_frames = obs_select_inds
+        # key_frames = obs_select_inds
+        if self.mode == 'waypoint':
+            key_frames = obs_select_inds
+        else:
+            key_frames = keypoint_discovery(demo_temple._observations)
 
         select_frames=[]
 
@@ -295,6 +311,12 @@ class Hive_dataset(Dataset):
 
         frame_ids = list(range(len(select_frames) - 1))
 
+        device = torch.device("cpu")
+        langs = []
+        langs.append(lang)
+        lang_feat = get_language_feat(langs, "clip", args.num_words, device).float()
+        lang_feat = lang_feat.squeeze()
+        
         # 存储带有 waypoint 的相关信息
         state_dict: List = [[] for _ in range(7)]
         state_dict[0].extend(frame_ids)
@@ -303,7 +325,7 @@ class Hive_dataset(Dataset):
         state_dict[3].extend(action)
         state_dict[4].extend(gripper)
         state_dict[5].extend(attn_indices)
-        state_dict[6].append(str(lang))
+        state_dict[6].append(lang_feat)
 
         taskvar_dir = self.output / task_name / f"variation{variation_number}"
         taskvar_dir.mkdir(parents=True, exist_ok=True)
@@ -458,9 +480,10 @@ if __name__ == "__main__":
     else:
         args.train_tasks = list(args.tasks)
 
+    args.output = args.output/args.mode
     dataset = Hive_dataset(
             args.train_dir, 
-            'valid_single_variation',
+            'train_single_variation',
             img_size=args.img_size,
             unused_camera_list = args.unused_camera_list, 
             preprocess = args.preprocess, 

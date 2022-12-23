@@ -17,7 +17,8 @@ class StackCubesColor(StackCubes):
 
     def modified_init_episode(self, index: int) -> List[str]:
         for obj in self.cube_list:
-            scale_factor = np.random.uniform(0.8, 1.2)
+            # scale_factor = np.random.uniform(0.8, 1.2)
+            scale_factor = 1
             relative_factor = scale_object(obj, scale_factor)
             if abs(relative_factor-1)>1e-2:
                 local_grasp_pose = obj.manipulated_part.local_grasp

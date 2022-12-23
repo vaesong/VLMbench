@@ -504,6 +504,14 @@ def select_color(index, other_color_numbers, replace=True):
       rgbs.append(rgb)
   return color_names, rgbs
 
+def select_fix_color(index, other_color_numbers, replace=True):
+  target_color_name, target_rgb = colors[0]
+  color_names, rgbs = [target_color_name], [target_rgb]
+  target_color_name, target_rgb = colors[1]
+  color_names.append(target_color_name)
+  rgbs.append(target_rgb)
+  return color_names, rgbs
+
 def import_distractors(pyrep: PyRep, path = './vlm/asset', select_number=5, scale=1e-4):
   models_path = []
   for path in Path(path).rglob('*.ttm'):

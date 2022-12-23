@@ -39,9 +39,10 @@ set_seed(random_seed)
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    '/home/liuchang/DATA/rlbench_data/single_test/seen',
+                    '/home/liuchang/DATA/rlbench_data/test_blue_red_green/seen',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks', ['stack_cubes_color'],
+flags.DEFINE_list('tasks', ['pick_cube_color',"stack_cubes_color","place_into_shape_sorter_color",'pour_demo_color',"drop_pen_color","open_door_complex", 'open_drawer'
+                           ],
 # [
 #                             'place_into_shape_sorter_color',
 #                             'place_into_shape_sorter_shape', 'place_into_shape_sorter_relative',
@@ -62,11 +63,11 @@ flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'but is faster.')
 flags.DEFINE_integer('processes', 16,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 30,
+flags.DEFINE_integer('episodes_per_task', 25,
                      'The number of episodes to collect per task.')
-flags.DEFINE_integer('episodes_per_task_all_variations', 0,
+flags.DEFINE_integer('episodes_per_task_all_variations', 100,
                      'The number of episodes to collect per task.')
-flags.DEFINE_integer('variations', 1,
+flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')
 
 class Recorder(object):

@@ -2,6 +2,7 @@
 定义的 VLMbench 的 dataset, 返回 hiverformer 所需要的数据
 """
 import os
+import re
 import numpy as np
 from torch.utils.data import Dataset
 import torch
@@ -108,6 +109,12 @@ class VLM_dataset(Dataset):
             self.variation_list =set()
             for path in self.dataset_path.rglob('low_dim_obs*'):#PosixPath('/home/zp_3c/liuchang/vlmbench/data/train/open_drawer/variation2/episodes/episode0/low_dim_obs.pkl')
                 path = path.relative_to(self.dataset_path)#PosixPath('open_drawer/variation2/episodes/episode0/low_dim_obs.pkl')
+
+                episode = (os.path.split(path.parents[0]))[-1]
+                list_number = re.findall(r"\d+",episode)
+                if int(list_number[0]) < 300:
+                    continue
+
                 task_name = str(path.parents[3]) #open_drawer
                 if task_name not in self.task_list:
                     self.task_list[task_name]={'success':[], 'fail':[]}
@@ -242,15 +249,15 @@ class VLM_dataset(Dataset):
             if (sequence_length-1) not in select_frames:
                 select_frames.append(sequence_length-1)
             
-            if self.mode == 'keyframe':
-                sperate_index = max_sperate_index(select_frames)
-                range1 = select_frames[sperate_index-1]
-                range2 = select_frames[sperate_index]
+            # if self.mode == 'keyframe':
+            #     sperate_index = max_sperate_index(select_frames)
+            #     range1 = select_frames[sperate_index-1]
+            #     range2 = select_frames[sperate_index]
 
-                random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
-                random_index2 = random.randint(random_index1+1,range2-1)
-                select_frames.insert(sperate_index,random_index2)
-                select_frames.insert(sperate_index,random_index1)
+            #     random_index1 = random.randint(range1+1,int(range1+(range2-range1)/2))
+            #     random_index2 = random.randint(random_index1+1,range2-1)
+            #     select_frames.insert(sperate_index,random_index2)
+            #     select_frames.insert(sperate_index,random_index1)
 
             valid_action_length = len(select_frames) - 1
 

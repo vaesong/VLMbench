@@ -184,7 +184,7 @@ class hiveformerAgent():
         hidden_dim=64,
         instr_size=512, #768
         mask_obs_prob=0.0,
-        max_episode_length=200,#100
+        max_episode_length=args.maxAction,#100
         num_words=75,
         num_layers=1,
         num_tasks = 24 #106
@@ -201,7 +201,7 @@ class hiveformerAgent():
     def act(self,obs,language,action_feat,step,step_id):
         # current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
         with torch.no_grad():
-            ob = obs[-1]
+            ob = obs # get current obs
             rgb,pcd,gripper = self.env.get_rgb_pcd_gripper_from_obs(ob)
             self.rgbs = torch.cat([self.rgbs , rgb.unsqueeze(1)], dim=1)
             self.pcds = torch.cat([self.pcds , pcd.unsqueeze(1)], dim=1)
@@ -212,6 +212,7 @@ class hiveformerAgent():
             # language = ['[CLS]'] + language + ['[SEP]']
             # instr_tokens = temp_instr_tokens + ['[PAD]'] * (80-len(temp_instr_tokens))
             # language = torch.from_numpy(np.array(self.tok.convert_tokens_to_ids(instr_tokens))).unsqueeze(0)
+            # print(language)
             lang = []
             lang.append(language)
             language = get_language_feat(lang,"clip",75,device=padding_mask.device)
@@ -226,6 +227,7 @@ class hiveformerAgent():
                 self.grippers.cuda(),
             )
             action = self.model.compute_action(pred)  # type: ignore
+
             # output["attention"] = pred["attention"]
             # action[:,0] = torch.clamp(action[:,0],-0.274,0.774)
             # action[:,1] = torch.clamp(action[:,1],-0.654,0.654)
@@ -244,7 +246,7 @@ def load_test_config(data_folder: Path, task_name):
     for path in data_folder.rglob('configs*'):
         t_name = path.parents[3].name
         v_name = path.parents[2].name
-        if t_name == task_name:
+        if t_name == task_name :
             episode_list.append(path.parent)
     return episode_list
 
@@ -257,40 +259,10 @@ def set_seed(seed, torch=False):
         import torch
         torch.manual_seed(seed)
 
-def add_argments():
-    parser = argparse.ArgumentParser(description='')
-    #dataset
-    parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/single_test")
-    parser.add_argument('--setd', type=str, default="seen")
-    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/stack_keyframe_version0/model.epoch=2000-value=0.pth", help='path of the trained model')
-    parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
-    parser.add_argument('--model_name', type=str, default="cliport_6dof")
-    parser.add_argument('--maxAction', type=int, default=12, help='Max Action sequence')
-    parser.add_argument('--img_size',nargs='+', type=int, default=[128,128])
-    parser.add_argument('--gpu', type=int, default=7)
-    parser.add_argument('--language_padding', type=int, default=80)
-    parser.add_argument('--task', type=str, default="stack")
-    parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=True)
-    parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
-    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
-    parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
-    parser.add_argument('--agent', type=str, default="hiveformerAgent", help="test agent")
-    parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the test results. Project Name")
-    args = parser.parse_args()
-    return args
-
-if __name__=="__main__":
-    args = add_argments()
-    if args.wandb_entity is not None:
-        import wandb
-    set_seed(0)
+def set_obs_config(img_size):
     obs_config = ObservationConfig()
     obs_config.set_all(True)
-    img_size=args.img_size
+    
     obs_config.right_shoulder_camera.image_size = img_size
     obs_config.left_shoulder_camera.image_size = img_size
     obs_config.overhead_camera.image_size = img_size
@@ -308,19 +280,16 @@ if __name__=="__main__":
     obs_config.overhead_camera.render_mode = RenderMode.OPENGL
     obs_config.wrist_camera.render_mode = RenderMode.OPENGL
     obs_config.front_camera.render_mode = RenderMode.OPENGL
+    return obs_config
 
-    # recorder = Recorder()
-    recorder = None
-    need_test_numbers = 20
-    replay_test = args.replay
-    
-    renew_obs = args.renew_obs
+def set_env(args,obs_config):
     need_post_grap = True
     need_pre_move = False
     if args.task == 'drop':
         task_files = ['drop_pen_color', 'drop_pen_relative', 'drop_pen_size']
     elif args.task == 'pick':
-        task_files = ['pick_cube_shape', 'pick_cube_relative', 'pick_cube_color', 'pick_cube_size']
+        # task_files = ['pick_cube_shape', 'pick_cube_relative', 'pick_cube_color', 'pick_cube_size']
+        task_files = ['pick_cube_color']
     elif args.task == 'stack':
         # task_files = ['stack_cubes_color', 'stack_cubes_relative', 'stack_cubes_shape', 'stack_cubes_size']
         task_files = ['stack_cubes_color']
@@ -353,6 +322,47 @@ if __name__=="__main__":
     else:
         action_mode = ActionMode(ArmActionMode.ABS_EE_POSE_PLAN_WORLD_FRAME_WITH_COLLISION_CHECK)
     env = Environment(action_mode, obs_config=obs_config, headless=True) # set headless=False, if user want to visualize the simulator
+    return task_files,env
+
+def add_argments():
+    parser = argparse.ArgumentParser(description='')
+    #dataset
+    parser.add_argument('--data_folder', type=str, default="/home/liuchang/DATA/rlbench_data/single_test")
+    parser.add_argument('--setd', type=str, default="seen")
+    parser.add_argument("--load", type=str, default="/home/liuchang/projects/VLMbench/VLMbench/xp/hiveformer/open_keyframe_version0/model.epoch=15000-value=0.pth", help='path of the trained model')
+    parser.add_argument('--lr', type=float, default=0.00001, help="the learning rate")
+    parser.add_argument('--model_name', type=str, default="cliport_6dof")
+    parser.add_argument('--maxAction', type=int, default=3, help='Max Action sequence')
+    parser.add_argument('--img_size',nargs='+', type=int, default=[128,128])
+    parser.add_argument('--gpu', type=int, default=7)
+    parser.add_argument('--language_padding', type=int, default=80)
+    parser.add_argument('--task', type=str, default="drawer")
+    parser.add_argument('--replay', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--recorder', type=lambda x:bool(strtobool(x)), default=True)
+    parser.add_argument('--relative', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--renew_obs', type=lambda x:bool(strtobool(x)), default=True)
+    parser.add_argument('--add_low_lang', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--ignore_collision', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--goal_conditioned', type=lambda x:bool(strtobool(x)), default=False)
+    parser.add_argument('--wandb_entity', type=str, default=None, help="visualize the test results. Account Name")
+    parser.add_argument('--agent', type=str, default="hiveformerAgent", help="test agent")
+    parser.add_argument('--wandb_project', type=str, default=None,  help="visualize the test results. Project Name")
+    args = parser.parse_args()
+    return args
+
+if __name__=="__main__":
+    args = add_argments()
+    if args.wandb_entity is not None:
+        import wandb
+    set_seed(0)
+    obs_config = set_obs_config(args.img_size)
+    # recorder = Recorder()
+    need_test_numbers = 20
+    replay_test = args.replay
+    
+    renew_obs = args.renew_obs
+    task_files,env = set_env(args,obs_config)
+
     env.launch()
 
     if args.recorder:
@@ -377,7 +387,7 @@ if __name__=="__main__":
     else:
         agent = ReplayAgent()
 
-    output_file_name = f"./results_{args.agent}/{args.agent}_{args.task}_{args.setd}"
+    output_file_name = f"/home/liuchang/projects/VLMbench/VLMbench/results_{args.agent}/{args.agent}_{args.task}_{args.setd}"
     if args.goal_conditioned:
         output_file_name += "_goalcondition"
     if args.ignore_collision:
@@ -390,8 +400,6 @@ if __name__=="__main__":
         task = env.get_task(task_to_train)
         # move = Mover(task, max_tries=10)
         for num, e in enumerate(e_path):
-            if num >= need_test_numbers:
-                break
             task_base = str(e/"task_base.ttm")
             waypoint_sets = str(e/"waypoint_sets.ttm")
             config = str(e/"configs.pkl")
@@ -411,6 +419,7 @@ if __name__=="__main__":
             try:
                 if len(waypoints_info['waypoint1']['target_obj_name'])!=0:
                     target_grasp_obj_name = waypoints_info['waypoint1']['target_obj_name']
+                    grasp_pose = waypoints_info['waypoint1']['pose'][0]
                 else:
                     grasp_pose = waypoints_info['waypoint1']['pose'][0]
                     target_name = None
@@ -437,15 +446,23 @@ if __name__=="__main__":
                 print(i)
                 # x_loss,y_loss,z_loss=0,0,0
                 # step = step_list[i]
-                if i == 0 and args.agent =="hiveformerAgent":
+                if args.agent =="hiveformerAgent" and i==0:
                     agent.clear()     
-                action = agent.act(history_img,high_descriptions,history_action,step,i)         
+                action = agent.act(obs,high_descriptions,history_action,step,i)         
                 print("action:")
                 print(action)
                 # current_waypoint,_, attention_id, gripper_control, waypoint_type, related_rotation, gt_pose  = step
                 # print("gt_pose:")
                 # print(gt_pose)
-                # collision_checking = False if waypoint_type == "grasp" else True
+                # if waypoint_type == "grasp":
+                #     collision_checking = False 
+                #     pre_action = action.copy()
+                #     pose = R.from_quat(action[3:7]).as_matrix()
+                #     pre_action[:3] -= 0.08*pose[:, 2]
+                #     pre_action[7] = 1
+                #     # action_list+=[pre_action, action]
+                # else: 
+                #     collision_checking = True
                 
                 # x_loss=(action[0]-gt_pose[0])
                 # y_loss=(action[1]-gt_pose[1])
@@ -457,8 +474,20 @@ if __name__=="__main__":
                 # if i == len(step_list)-1:
                 #     action[7] = 1
                 # file.write(f"{task.get_name()}:x_loss: {x_loss}, y_loss: {y_loss}, z_loss {z_loss} %!\n")
+                # print(f"{task.get_name()}:x_loss: {x_loss}, y_loss: {y_loss}, z_loss {z_loss} %!\n")
                 try:
-                    obs, reward, terminate = task.step(action, None, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
+                    # if waypoint_type == "grasp":
+                    # obs, reward, terminate = task.step(pre_action, None, recorder = recorder, need_grasp_obj = target_grasp_obj_name)
+                    # if i == 1:
+                    #     collision_checking = False  
+                    # else :
+                    #     collision_checking = True
+                    # if i == 1:
+                    #     print("grasp_pose:")
+                    #     print(grasp_pose)
+                    #     action[:7] = grasp_pose
+                    #     action[7] = 0 
+                    obs, reward, terminate = task.step(action, None , recorder = recorder, need_grasp_obj = target_grasp_obj_name)
                     history_img.append(obs)
                     history_action.append((np.append(obs.gripper_pose,obs.gripper_open)))
                 except:
@@ -477,7 +506,7 @@ if __name__=="__main__":
             recorder.del_snap()
             print(f"{task.get_name()}: success {success_times} times in {all_time} steps! success rate {round(success_times/all_time * 100, 2)}%!")
             print(f"{task.get_name()}: grasp success {grasp_success_times} times in {all_time} steps! grasp success rate {round(grasp_success_times/all_time * 100, 2)}%!")
-            file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n")
+            file.write(f"{task.get_name()}:grasp success: {grasp_success_times}, success: {success_times}, toal {all_time} steps, success rate: {round(success_times/all_time * 100, 2)}%!\n\n")   
     file.close()
     env.shutdown()
 

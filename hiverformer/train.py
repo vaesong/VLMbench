@@ -4,6 +4,7 @@ import itertools
 import pickle
 import os
 import time
+import json
 from pathlib import Path
 import torch
 from torch import nn
@@ -18,7 +19,7 @@ from filelock import FileLock
 import tap
 from hiverformer.process_instructions import get_language_feat
 from hiverformer.network import Hiveformer
-from hiverformer.dataset import My_Dataset
+from hiverformer.dataset import My_Dataset, RLBenchDataset
 from hiverformer.utils import (
     LossAndMetrics,
     count_parameters,
@@ -32,7 +33,7 @@ class Arguments(tap.Tap):
     accumulate_grad_batches: int = 1
     cameras: list = ['left_shoulder','right_shoulder','wrist']
     checkpoint: Optional[Path] = None
-    checkpoint_period: int = 200
+    checkpoint_period: int = 10000
     
     xp: Path = "/home/liuchang/projects/VLMbench/VLMbench/xp"
     valset: Optional[Tuple[Path, ...]] = None
@@ -42,37 +43,38 @@ class Arguments(tap.Tap):
     max_tries: int = 10
     max_episodes_per_taskvar: int = 100
     instructions: Optional[Path] = None
-    cache_size: int = 100
+    cache_size: int = 300
     seed: int = 2
 
     # tasks: Tuple[str, ...]
     tasks: Tuple[str, ...]
     train_tasks: List = []
-    variations: Tuple[int, ...] = (0,)
+    train_variations: Tuple[int, ...] = (0,1,2,)
+    valid_variations: Tuple[int, ...] = (0,)
 
     # Train
-    batch_size: int = 25 # 25
-    lr: float = 0.001
-    val_freq: int = 200     # 200
-    val_batch_size: int = 25
+    batch_size: int = 64 # 25
+    lr: float = 0.0005
+    val_freq: int = 10000     # 200
+    val_batch_size: int = 64
     jitter: bool = False
     
     # 自己加的
     train_dir: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/packaged"
-    valid_dir: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/valid"
-    epochs: int = 100000
+    valid_dir: Path = "/home/liuchang/projects/VLMbench/VLMbench/hiverformer/packaged/valid"
+    epochs: int = 400000
     relative: bool = False
     renew_obs: bool = False
     add_low_lang: bool = True
-    maxAction: int = 10
+    maxAction: int = 4
 
     img_size: list = [128, 128]
     unused_camera_list: list = ['overhead','front']
     preprocess: bool = False
     use_fail_cases: bool = False
     sample_numbers: int = 0
-    workers: int = 4
-    persistent_workers: bool = True
+    workers: int = 0
+    persistent_workers: bool = False
     gpu: int = 0
 
     # distributed
@@ -100,7 +102,7 @@ class Arguments(tap.Tap):
     num_layers: int = 1
     num_words: int = 75
     num_tasks: int = 24
-    mode: str = 'waypoint'
+    mode: str = 'train_blue_red_green'
 
 
 def training(
@@ -114,11 +116,12 @@ def training(
     args: Arguments,
     writer: SummaryWriter,
 ):
+    # model.eval()
     iter_loader = iter(train_loader)
     device = next(model.parameters()).device
 
     print('---------------------------------------------start------------------------------------------------------')
-    with trange(args.epochs, ncols=160) as tbar:
+    with trange(args.epochs, ncols=100) as tbar:
         for step_id in tbar:
             try:
                 sample = next(iter_loader)
@@ -132,8 +135,8 @@ def training(
             outputs = sample["action"].to(device) # B 4key_frame 8(action_ls[1:]) except for the start index action 
             padding_mask = sample["padding_mask"].to(device)
 
-            instr = sample["language"] # B 53 512
-            lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
+            lang_feat = sample["language"].to(device) # B 53 512
+            # lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
 
             if step_id % args.accumulate_grad_batches == 0:
                 optimizer.zero_grad()
@@ -246,11 +249,9 @@ def validation_step(
         gripper = sample["gripper"].to(device)
         outputs = sample["action"].to(device)
         padding_mask = sample["padding_mask"].to(device)
-        instr = sample["language"]
-        lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 768
 
-        instr = sample["language"] # B 53 512
-        lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
+        lang_feat = sample["language"].to(device) # B 75 512
+        # lang_feat = get_language_feat(instr, "clip", args.num_words, device).float().to(device)  # B 75 512
 
         pred = model(
             rgbs,
@@ -287,7 +288,7 @@ def validation_step(
 
     return values
 
-def get_taskvar(tasks: Tuple[str, ...], root: Path):
+def get_taskvar(tasks: Tuple[str, ...], root: Path, variations: Tuple[int, ...]):
     # 确定训练的任务
     if 'all' in list(tasks):
         train_tasks =  [
@@ -306,8 +307,8 @@ def get_taskvar(tasks: Tuple[str, ...], root: Path):
     task_var = []
 
     for task in train_tasks:
-        path = root / task
-        variations = os.listdir(path)
+        # path = root / task
+        # variations = os.listdir(path)
         for var in variations:
             task_var.append((task, var))
 
@@ -333,9 +334,10 @@ def main(gpu, ngpus_per_node, args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
+    args.train_dir = args.train_dir/args.mode
     # 确定训练的任务
-    train_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.train_dir)
-    valid_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.valid_dir)
+    train_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.train_dir, args.train_variations)
+    # valid_taskvar: List[Tuple[str, str]] = get_taskvar(args.tasks, args.valid_dir, args.valid_variations)
 
     # 处理 checkpoint 存放的路径,只有主进程才生成 tensorboard 文件
     if args.rank == 0:
@@ -348,15 +350,19 @@ def main(gpu, ngpus_per_node, args):
     else:
         writer = None
 
+    # 获得最大的任务长度
+    with open("episodes.json") as fid:
+        episodes = json.load(fid)
+    max_eps_dict = episodes["max_episode_length"]
+    args.maxAction = max_eps_dict[args.tasks[0]]
     # 构建模型和优化器
-    max_episode_length = 20
     model = Hiveformer(
         depth=args.depth,
         dim_feedforward=args.dim_feedforward,
         hidden_dim=args.hidden_dim,
         instr_size=args.instr_size,
         mask_obs_prob=args.mask_obs_prob,
-        max_episode_length=max_episode_length,
+        max_episode_length=args.maxAction,
         num_words=args.num_words,
         num_layers=args.num_layers,
         num_tasks=args.num_tasks,
@@ -423,12 +429,21 @@ def main(gpu, ngpus_per_node, args):
         checkpointer = None
 
     # 构建训练集和 train_loader
-    train_dataset = My_Dataset(
+    # train_dataset = My_Dataset(
+    #     root=args.train_dir,
+    #     taskvar=train_taskvar,
+    #     max_episode_length=args.maxAction,
+    #     cache_size=args.cache_size,
+    #     training=True,
+    # )
+
+    train_dataset = RLBenchDataset(
         root=args.train_dir,
         taskvar=train_taskvar,
         max_episode_length=args.maxAction,
+        max_episodes_per_taskvar=args.max_episodes_per_taskvar,
         cache_size=args.cache_size,
-        training=True,
+        cameras=args.cameras,  # type: ignore
     )
 
     if args.distributed:
@@ -441,35 +456,37 @@ def main(gpu, ngpus_per_node, args):
             batch_size=args.batch_size, 
             shuffle=(train_sampler is None),
             num_workers=args.workers, 
-            pin_memory=True, 
+            pin_memory=False, 
             sampler=train_sampler, 
             drop_last=True,
             persistent_workers=args.persistent_workers) #,persistent_workers=True
     
     # 构建验证集和 val_loader
-    val_dataset = My_Dataset(
-        root=args.valid_dir,
-        taskvar=valid_taskvar,
-        max_episode_length=args.maxAction,
-        cache_size=args.cache_size,
-        training=False,
-    )
+    # val_dataset = RLBenchDataset(
+    #     root=args.valid_dir,
+    #     taskvar=valid_taskvar,
+    #     max_episode_length=args.maxAction,
+    #     max_episodes_per_taskvar=args.max_episodes_per_taskvar,
+    #     cache_size=args.cache_size,
+    #     cameras=args.cameras,  # type: ignore
+    # )
 
-    if args.distributed:
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    else:
-        val_sampler = None
+    # if args.distributed:
+    #     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+    # else:
+    #     val_sampler = None
 
-    val_loader = torch.utils.data.DataLoader(  
-            val_dataset, 
-            batch_size=args.batch_size, 
-            shuffle=(val_sampler is None),
-            num_workers=args.workers, 
-            pin_memory=True, 
-            sampler=val_sampler, 
-            drop_last=True,
-            persistent_workers=args.persistent_workers) #,persistent_workers=True
-    
+    # val_loader = torch.utils.data.DataLoader(  
+    #         val_dataset, 
+    #         batch_size=args.batch_size, 
+    #         shuffle=(val_sampler is None),
+    #         num_workers=args.workers, 
+    #         pin_memory=False, 
+    #         sampler=val_sampler, 
+    #         drop_last=True,
+    #         persistent_workers=args.persistent_workers) #,persistent_workers=True
+
+    val_loader = None
     # 开始训练
     training(
         model,

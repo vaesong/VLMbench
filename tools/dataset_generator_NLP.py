@@ -31,10 +31,9 @@ If you want to generate unseen data, please set the colors and objects to the un
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('save_path',
-                    '/home/liuchang/DATA/rlbench_data/train_single_variation',
+                    '/home/liuchang/DATA/rlbench_data/train_blue_red_green',
                     'Where to save the demos.')
-flags.DEFINE_list('tasks',[ 'pick_cube_color'
-                           ] ,
+flags.DEFINE_list('tasks',["drop_pen_color","open_door_complex", 'open_drawer'] ,
                   'The tasks to collect. If empty, all tasks are collected.')     
                 #   [
                 #             'drop_pen_color', 'drop_pen_relative', 'drop_pen_size',
@@ -47,16 +46,16 @@ flags.DEFINE_list('tasks',[ 'pick_cube_color'
                 #             'open_drawer',
                 #             'open_door_complex'
                 #             ]          
-flags.DEFINE_list('image_size', [360, 360],
+flags.DEFINE_list('image_size', [128, 128],
                   'The size of the images tp save.')
 flags.DEFINE_enum('renderer',  'opengl', ['opengl', 'opengl3'],
                   'The renderer to use. opengl does not include shadows, '
                   'but is faster.')
-flags.DEFINE_integer('processes', 16,
+flags.DEFINE_integer('processes', 12,
                      'The number of parallel processes during collection.')
-flags.DEFINE_integer('episodes_per_task', 200,
+flags.DEFINE_integer('episodes_per_task', 100,
                      'The number of episodes to collect per task.')
-flags.DEFINE_integer('variations', 1,
+flags.DEFINE_integer('variations', -1,
                      'Number of variations to collect per task. -1 for all.')
 flags.DEFINE_bool('save_configs', True,
                      'whether also save the config for replay.')

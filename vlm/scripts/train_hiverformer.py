@@ -59,7 +59,7 @@ class Arguments(tap.Tap):
 
     # Train
     batch_size: int = 24
-    lr: float = 0.001
+    lr: float = 0.0005
     val_freq: int = 200     # 200
     val_batch_size: int = 16
     jitter: bool = False
@@ -78,8 +78,8 @@ class Arguments(tap.Tap):
     preprocess: bool = False
     use_fail_cases: bool = False
     sample_numbers: int = 0
-    workers: int = 4
-    persistent_workers: bool = True
+    workers: int = 0
+    persistent_workers: bool = False
     gpu: int = 0
 
     # distributed
@@ -323,6 +323,14 @@ def validation_step(
 
     return values
 
+def reduce_tensor(tensor):
+    rt = tensor.clone()
+    dist.all_reduce(rt, op=dist.reduce_op.SUM)
+    rt /= args.world_size
+    return rt
+    # 调用之前还需要插入同步 API，在所有进程运行到这一步之前，先完成此前代码的进程会等待其他进程
+    # torch.distributed.barrier()
+
 def main(gpu, ngpus_per_node, args):
 
     # 首先处理分布式的问题
@@ -474,7 +482,7 @@ def main(gpu, ngpus_per_node, args):
     # 构建验证集和 val_loader
     val_dataset = VLM_dataset(
             args.valid_dir,
-            'valid_single_variation',
+            'valid',
             img_size=args.img_size,
             unused_camera_list = args.unused_camera_list, 
             preprocess = args.preprocess, 

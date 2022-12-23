@@ -803,8 +803,8 @@ class Hiveformer(nn.Module):
         z_pos = einops.repeat(z_pos, "t (n d) -> b t n d", b=B, n=num_tasks, d=3)
         z_pos = z_pos[padding_mask]
 
-        # z_offset = torch.bmm(z_instr, z_pos).squeeze(1)
-        # position += z_offset
+        z_offset = torch.bmm(z_instr, z_pos).squeeze(1)
+        position += z_offset
         # print("z_pos:"+z_pos)
         # print("z_offset:"+str(z_offset))
 
